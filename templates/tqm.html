@@ -4,73 +4,98 @@
   <meta charset="utf-8">
   <title>Daraz Orders</title>
   <style>
-    body { font-family: system-ui, Arial, sans-serif; padding: 16px; }
-    h2 { margin: 0 0 8px 0; }
-    .meta { color: #6b7280; font-size: 12px; margin-bottom: 12px; }
+    :root{
+      --bg:#f6f7fb; --card:#fff; --muted:#6b7280; --ink:#0f172a;
+      --line:#e5e7eb; --line-soft:#eef2f7; --brand:#10b981; --brand-ink:#065f46;
+      --warn-bg:#fff7ed; --warn-ink:#9a3412; --ok-bg:#ecfdf5; --ok-ink:#065f46;
+      --chip:#eef2f7; --chip-ink:#334155; --radius:12px;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0; padding:16px; background:var(--bg); color:var(--ink);
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+      font-variant-numeric:tabular-nums;
+    }
+    h2{margin:0 0 12px 0}
+    .wrap{max-width:1280px; margin:0 auto}
+    .meta{color:var(--muted); font-size:12px}
 
-    /* Top bar */
-    .topbar { display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; margin-bottom:12px; }
-    .field label { display:block; font-size:12px; color:#374151; margin-bottom:4px; }
-    .field input, .field select { padding:8px; border:1px solid #d1d5db; border-radius:8px; font:inherit; }
-    .btn { border:1px solid #d1d5db; background:#fff; padding:8px 12px; border-radius:8px; cursor:pointer; font-size:14px; }
-    .btn:hover { background:#f9fafb; }
-    .btn.primary { border-color:#10b981; color:#065f46; }
+    /* Top bar & buttons */
+    .topbar{display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; margin:8px 0 12px}
+    .field label{display:block; font-size:12px; color:#374151; margin-bottom:4px}
+    .field input,.field select{padding:8px 10px; border:1px solid var(--line); border-radius:10px; font:inherit; background:#fff}
+    .btn{border:1px solid var(--line); background:#fff; padding:8px 12px; border-radius:10px; cursor:pointer; font-size:14px}
+    .btn:hover{background:#f9fafb}
+    .btn.primary{border-color:var(--brand); color:var(--brand-ink); background:#ecfdf5}
+    .btn.tiny{padding:6px 10px; font-size:12px}
 
     /* Cards */
-    .cards { display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap:12px; margin-bottom:16px; }
-    .card { border:1px solid #e5e7eb; border-radius:12px; padding:12px; background:#fff; }
-    .card h4 { margin:0 0 6px 0; font-size:14px; color:#374151; }
-    .card .big { font-size:20px; font-weight:700; }
-    .row { display:flex; justify-content:space-between; font-size:12px; color:#6b7280; }
+    .cards{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin:6px 0 16px}
+    .card{background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:12px}
+    .card h4{margin:0 0 6px 0; font-size:13px; color:#374151}
+    .big{font-size:22px; font-weight:800}
+    .row{display:flex; justify-content:space-between; font-size:12px; color:var(--muted)}
 
-    /* Main table */
-    table.main { width: 100%; border-collapse: collapse; }
-    table.main th, table.main td { border: 1px solid #e5e7eb; padding: 8px; vertical-align: top; }
-    table.main th { background: #f5f5f5; text-align: left; }
+    /* Table wrapper */
+    .table-wrap{background:var(--card); border:1px solid var(--line); border-radius:var(--radius); overflow:hidden}
+    .scroll-x{overflow-x:auto}
+    table.main{width:100%; border-collapse:separate; border-spacing:0}
+    table.main th, table.main td{padding:10px; vertical-align:top; border-bottom:1px solid var(--line-soft)}
+    table.main thead th{position:sticky; top:0; z-index:1; background:#f5f7fb; text-align:left; font-weight:600; border-bottom:1px solid var(--line)}
+    table.main tbody tr:nth-child(even) td{background:#fafbff}
+    table.main tbody tr:hover td{background:#f8fbff}
+
+    /* New compact column widths */
+    .w-order{width:190px}
+    .w-cust{width:320px}
+    .w-fin{width:260px}
+    .w-items{width:auto}
+    .muted{color:var(--muted); font-size:12px}
+    .money{white-space:nowrap}
+
+    /* Invoice pill button */
+    .inv-btn{border:none; background:#ecfdf5; color:var(--brand-ink); padding:4px 10px; border-radius:999px; cursor:pointer; font-weight:700}
+    .inv-btn:hover{background:#d1fae5}
+
+    /* Financials stack */
+    .fin{display:grid; grid-template-columns: 1fr auto; row-gap:6px; column-gap:10px; align-items:center}
+    .fin .lbl{color:var(--muted); font-size:12px}
+    .fin .val{text-align:right}
+    .fin .sum{font-weight:800}
+    .fin .ok{color:var(--brand-ink); font-weight:800}
+    .fin .neg{color:#b91c1c; font-weight:800}
+    .fin .split{grid-column:1 / -1}
 
     /* Items nested table */
-    table.items { width: 100%; border-collapse: collapse; }
-    table.items th, table.items td { border-top: 1px solid #e5e7eb; padding: 8px; vertical-align: top; }
-    table.items th { background: #fafafa; text-align: left; }
-    table.items td img { width: 72px; height: 72px; object-fit: cover; border-radius: 6px; }
+    table.items{width:100%; border-collapse:separate; border-spacing:0}
+    table.items th, table.items td{padding:8px; border-top:1px solid var(--line-soft)}
+    table.items th{background:#fbfbfe; text-align:left}
+    table.items td img{width:70px; height:70px; object-fit:cover; border-radius:8px; border:1px solid var(--line)}
 
-    .w-id    { width: 140px; }
-    .w-date  { width: 120px; }
-    .w-cust  { width: 300px; }
-    .w-price { width: 120px; text-align: right; white-space: nowrap; }
-    .w-inv   { width: 220px; text-align: right; }
-    .w-cost  { width: 160px; text-align: right; }
-    .w-net   { width: 130px; text-align: right; }
-    .w-paid  { width: 120px; text-align: center; }
-    .w-items { width: auto; }
-    .muted { color: #6b7280; font-size: 12px; }
+    /* Chips */
+    .chip{display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; background:#eef2f7; color:#334155}
+    .chip.vendor.sleek{background:#eff6ff; color:#1d4ed8}
+    .chip.vendor.tick{background:#fef3c7; color:#92400e}
+    .chip.vendor.other{background:#f3f4f6; color:#374151}
+    .chip.returned{background:#fff7ed; color:#9a3412}
 
-    .inv-btn { display:inline-block; border:none; background:none; padding:0; margin:0; font: inherit; color:#0b7; cursor:pointer; font-weight:700; text-align:right; }
-    .inv-btn:hover { text-decoration: underline; }
-
-    .badge { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; border:1px solid #e5e7eb; }
-    .badge.warn { background:#fff7ed; border-color:#fed7aa; color:#9a3412; }
-    .badge.ok { background:#ecfdf5; border-color:#a7f3d0; color:#065f46; }
-
-    /* Modal (shared) */
-    .modal { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; z-index: 1000; }
-    .modal.open { display: flex; }
-    .modal-backdrop { position:absolute; inset:0; background: rgba(0,0,0,.4); }
-    .modal-card { position: relative; background:#fff; width:min(520px, 95vw); max-height:85vh; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.15); overflow: hidden; display:flex; flex-direction: column; }
-    .modal-head { padding:14px 16px; border-bottom:1px solid #e5e7eb; display:flex; justify-content:space-between; align-items:center; }
-    .modal-title { font-weight:700; }
-    .modal-close { background:none; border:none; font-size:20px; cursor:pointer; line-height:1; }
-    .modal-body { padding:14px 16px; overflow:auto; }
-
-    /* Cost modal fields */
-    .field.small label { font-size:12px; color:#374151; margin-bottom:4px; display:block; }
-    .field.small input, .field.small select { width:100%; padding:8px; border:1px solid #d1d5db; border-radius:8px; font:inherit; }
+    /* Modal shared */
+    .modal{position:fixed; inset:0; display:none; align-items:center; justify-content:center; z-index:1000}
+    .modal.open{display:flex}
+    .modal-backdrop{position:absolute; inset:0; background:rgba(0,0,0,.38)}
+    .modal-card{position:relative; background:#fff; width:min(560px,95vw); max-height:85vh; border-radius:16px; box-shadow:0 18px 50px rgba(2,6,23,.25); overflow:hidden; display:flex; flex-direction:column}
+    .modal-head{padding:14px 16px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center}
+    .modal-title{font-weight:800}
+    .modal-close{background:none; border:none; font-size:20px; cursor:pointer; line-height:1}
+    .modal-body{padding:14px 16px; overflow:auto}
   </style>
 </head>
 <body>
+<div class="wrap">
   <h2>Daraz Orders</h2>
 
-  <!-- Top bar: date filters -->
+  <!-- Top bar -->
   <form class="topbar" method="GET">
     <div class="field">
       <label for="from">From</label>
@@ -96,98 +121,134 @@
       <h4>Total Net Profit Collected</h4>
       <div class="big">{{ stats.net_profit_collected }}</div>
     </div>
+    <div class="card">
+      <h4>Range</h4>
+      <div class="big">{{ created_after }}</div>
+      {% if created_before %}<div class="meta">to {{ created_before }}</div>{% else %}<div class="meta">to present</div>{% endif %}
+    </div>
   </div>
 
-  <div class="meta">Showing orders from <b>{{ created_after }}</b>{% if created_before %} to <b>{{ created_before }}</b>{% endif %}. Total: <b>{{ orders|length }}</b></div>
+  <div class="meta" style="margin:6px 0 10px">
+    Showing orders from <b>{{ created_after }}</b>{% if created_before %} to <b>{{ created_before }}</b>{% endif %}. Total: <b>{{ orders|length }}</b>
+  </div>
 
-  <table class="main">
-    <thead>
-      <tr>
-        <th class="w-id">Order ID</th>
-        <th class="w-date">Order Date</th>
-        <th class="w-cust">Customer</th>
-        <th class="w-price">Price</th>
-        <th class="w-inv">Invoice</th>
-        <th class="w-cost">Costs</th>
-        <th class="w-net">Net Profit</th>
-        <th class="w-paid">Paid</th>
-        <th class="w-items">Items</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for o in orders %}
-      <tr>
-        <td class="w-id"><b>{{ o.order_id }}</b></td>
-        <td class="w-date">{{ o.order_date }}</td>
-        <td class="w-cust">
-          <div><b>{{ o.customer.name }}</b></div>
-          {% if o.customer.address %}<div class="muted">{{ o.customer.address }}</div>{% endif %}
-          {% if o.customer.phone %}<div class="muted">{{ o.customer.phone }}</div>{% endif %}
-        </td>
-        <td class="w-price">{{ o.price }}</td>
-        <td class="w-inv">
-          <button
-            class="inv-btn"
-            data-order="{{ o.order_id }}"
-            data-amount="{{ o.invoice_amount }}"
-            data-statement="{{ o.statement or '' }}"
-            data-paid="{{ o.paid_status or '' }}"
-            data-breakdown='{{ o.invoice_breakdown|default([])|tojson }}'
-          >{{ o.invoice_amount }}</button>
-          {% if o.statement %}<div class="muted">{{ o.statement }}</div>{% endif %}
-          <div class="muted">{{ o.paid_status }}</div>
-        </td>
-        <td class="w-cost">
-          {{ o.product_cost_total }}
-          <div class="muted">(Pkg: {{ o.packaging_total }})</div>
-        </td>
-        <td class="w-net">{{ o.net_profit }}</td>
-        <td class="w-paid">
-          <button class="btn primary paid-btn" data-order="{{ o.order_id }}" data-paid="{{ 1 if o.vendor_paid else 0 }}">
-            {% if o.vendor_paid %}Paid ✓{% else %}Mark as Paid{% endif %}
-          </button>
-        </td>
-        <td class="w-items">
-          <table class="items">
-            <thead>
-              <tr>
-                <th style="width:110px;">Image</th>
-                <th>Title</th>
-                <th style="width:90px;">Qty</th>
-                <th style="width:220px;">Tracking</th>
-                <th style="width:200px;">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% if o.items_list|length == 0 %}
-                <tr><td colspan="5" class="muted">No items.</td></tr>
-              {% else %}
-                {% for it in o.items_list %}
-                <tr class="item-row" data-key="{{ it.key }}">
-                  <td>{% if it.item_image %}<img src="{{ it.item_image }}" alt="">{% endif %}</td>
-                  <td>
-                    {{ it.item_title }}
-                    {% if it.vendor %}<div class="muted">Vendor: {{ it.vendor }}</div>{% endif %}
-                  </td>
-                  <td>{{ it.quantity }}</td>
-                  <td>{{ it.tracking_number }}<br><span class="muted">{{ it.status }}</span></td>
-                  <td>
-                    {% if it.needs_cost %}
-                      <button class="btn set-cost" data-key="{{ it.key }}" data-title="{{ it.item_title }}">Set cost</button>
-                    {% else %}
-                      <span class="muted">Saved</span>
-                    {% endif %}
-                  </td>
+  <div class="table-wrap scroll-x">
+    <table class="main">
+      <thead>
+        <tr>
+          <th class="w-order">Order</th>
+          <th class="w-cust">Customer</th>
+          <th class="w-fin">Financials</th>
+          <th class="w-items">Items</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for o in orders %}
+        <tr>
+          <!-- Order: ID + Date in one column -->
+          <td class="w-order">
+            <div style="font-weight:700">{{ o.order_id }}</div>
+            <div class="meta" style="margin-top:4px">{{ o.order_date }}</div>
+          </td>
+
+          <!-- Customer -->
+          <td class="w-cust">
+            <div style="font-weight:700">{{ o.customer.name }}</div>
+            {% if o.customer.address %}<div class="meta">{{ o.customer.address }}</div>{% endif %}
+            {% if o.customer.phone %}<div class="meta">{{ o.customer.phone }}</div>{% endif %}
+          </td>
+
+          <!-- Financials stack -->
+          <td class="w-fin">
+            <div class="fin">
+              <div class="lbl">Price</div>
+              <div class="val money">{{ o.price }}</div>
+
+              <div class="lbl">Invoice</div>
+              <div class="val">
+                <button
+                  class="inv-btn"
+                  data-order="{{ o.order_id }}"
+                  data-amount="{{ o.invoice_amount }}"
+                  data-statement="{{ o.statement or '' }}"
+                  data-paid="{{ o.paid_status or '' }}"
+                  data-breakdown='{{ o.invoice_breakdown|default([])|tojson }}'
+                >{{ o.invoice_amount }}</button>
+                {% if o.statement %}<div class="meta">{{ o.statement }}</div>{% endif %}
+                <div class="meta">{{ o.paid_status }}</div>
+              </div>
+
+              <div class="lbl">Costs</div>
+              <div class="val money">
+                {{ o.product_cost_total }}
+                <div class="meta">(Pkg: {{ o.packaging_total }})</div>
+              </div>
+
+              <div class="lbl">Net Profit</div>
+              <div class="val money">
+                {% set np = o.net_profit|replace('PKR ','')|replace(',','')|float %}
+                <span class="{{ 'neg' if np < 0 else 'ok' }}">{{ o.net_profit }}</span>
+              </div>
+
+              <div class="split" style="text-align:right">
+                <button class="btn tiny primary paid-btn" data-order="{{ o.order_id }}" data-paid="{{ 1 if o.vendor_paid else 0 }}">
+                  {% if o.vendor_paid %}Paid ✓{% else %}Mark as Paid{% endif %}
+                </button>
+              </div>
+            </div>
+          </td>
+
+          <!-- Items -->
+          <td class="w-items">
+            <table class="items">
+              <thead>
+                <tr>
+                  <th style="width:110px;">Image</th>
+                  <th>Title</th>
+                  <th style="width:70px;">Qty</th>
+                  <th style="width:220px;">Tracking</th>
+                  <th style="width:160px;">Actions</th>
                 </tr>
-                {% endfor %}
-              {% endif %}
-            </tbody>
-          </table>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+              </thead>
+              <tbody>
+                {% if o.items_list|length == 0 %}
+                  <tr><td colspan="5" class="meta">No items.</td></tr>
+                {% else %}
+                  {% for it in o.items_list %}
+{% set t3 = it.item_title|first_words(3) %}
+                  <tr class="item-row" data-key="{{ it.key }}">
+                    <td>{% if it.item_image %}<img src="{{ it.item_image }}" alt="">{% endif %}</td>
+                    <td>
+                      <div style="font-weight:600" title="{{ it.item_title }}">{{ t3 }}</div>
+                      <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:4px">
+                        {% if it.vendor %}
+                          <span class="chip vendor {% if it.vendor == 'Sleek Space' %}sleek{% elif it.vendor == 'Tick Bags' %}tick{% else %}other{% endif %}">Vendor: {{ it.vendor }}</span>
+                        {% endif %}
+                        {% if it.is_returned %}
+                          <span class="chip returned">Returned — product cost waived</span>
+                        {% endif %}
+                      </div>
+                    </td>
+                    <td>{{ it.quantity }}</td>
+                    <td>{{ it.tracking_number }}<br><span class="meta">{{ it.status }}</span></td>
+                    <td>
+                      {% if it.needs_cost %}
+                        <button class="btn tiny set-cost" data-key="{{ it.key }}" data-title="{{ it.item_title }}">Set cost</button>
+                      {% else %}
+                        <span class="meta">Saved</span>
+                      {% endif %}
+                    </td>
+                  </tr>
+                  {% endfor %}
+                {% endif %}
+              </tbody>
+            </table>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 
   <!-- INVOICE MODAL -->
   <div id="invoice-modal" class="modal" aria-hidden="true">
@@ -201,20 +262,20 @@
         <div style="display:flex; justify-content:space-between; margin:4px 0; font-weight:700;">
           <span>Total</span><span id="im-amount"></span>
         </div>
-        <div style="display:flex; justify-content:space-between; margin:4px 0; color:#6b7280;">
+        <div style="display:flex; justify-content:space-between; margin:4px 0; color:var(--muted);">
           <span>Statement</span><span id="im-statement"></span>
         </div>
         <div style="display:flex; justify-content:space-between; margin:4px 0;">
-          <span>Status</span><span id="im-paid" class="badge"></span>
+          <span>Status</span><span id="im-paid" class="chip"></span>
         </div>
-        <div style="border-top:1px solid #eef2f7; margin:10px 0;"></div>
-        <div class="muted" style="margin-bottom:6px;">Breakdown</div>
+        <div style="border-top:1px solid var(--line-soft); margin:10px 0;"></div>
+        <div class="meta" style="margin-bottom:6px;">Breakdown</div>
         <table style="width:100%; border-collapse:collapse;"><tbody id="im-breakdown"></tbody></table>
       </div>
     </div>
   </div>
 
-  <!-- COST MODAL (with Vendor dropdown) -->
+  <!-- COST MODAL -->
   <div id="cost-modal" class="modal" aria-hidden="true">
     <div class="modal-backdrop"></div>
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="cm-title">
@@ -223,20 +284,18 @@
         <button class="modal-close" id="cm-close" aria-label="Close">×</button>
       </div>
       <div class="modal-body">
-        <div class="muted" id="cm-desc" style="margin-bottom:8px;"></div>
-        <div class="field small">
+        <div class="meta" id="cm-desc" style="margin-bottom:8px;"></div>
+        <div class="field" style="margin-bottom:8px;">
           <label for="cm-vendor">Vendor</label>
           <select id="cm-vendor">
-            {% for v in vendors %}
-              <option value="{{ v }}">{{ v }}</option>
-            {% endfor %}
+            {% for v in vendors %}<option value="{{ v }}">{{ v }}</option>{% endfor %}
           </select>
         </div>
-        <div class="field small">
+        <div class="field" style="margin-bottom:8px;">
           <label for="cm-pc">Product Cost (PKR)</label>
           <input id="cm-pc" type="number" step="0.01" min="0" placeholder="0.00">
         </div>
-        <div class="field small">
+        <div class="field">
           <label for="cm-pkg">Packaging (PKR)</label>
           <input id="cm-pkg" type="number" step="0.01" min="0" placeholder="0.00">
         </div>
@@ -247,136 +306,123 @@
       </div>
     </div>
   </div>
+</div>
 
-  <script>
-    (function(){
-      // ----- Invoice modal -----
-      const invModal = document.getElementById('invoice-modal');
-      const invBackdrop = invModal.querySelector('.modal-backdrop');
-      const invClose = document.getElementById('im-close');
-      const amountEl = document.getElementById('im-amount');
-      const stmtEl = document.getElementById('im-statement');
-      const paidEl = document.getElementById('im-paid');
-      const tbody = document.getElementById('im-breakdown');
+<script>
+(function(){
+  // ----- Invoice modal -----
+  const invModal = document.getElementById('invoice-modal');
+  const invBackdrop = invModal.querySelector('.modal-backdrop');
+  const invClose = document.getElementById('im-close');
+  const amountEl = document.getElementById('im-amount');
+  const stmtEl = document.getElementById('im-statement');
+  const paidEl = document.getElementById('im-paid');
+  const tbody = document.getElementById('im-breakdown');
 
-      function openInvoiceModal(data){
-        amountEl.textContent = data.amount || '';
-        stmtEl.textContent = data.statement || '';
-        paidEl.textContent = data.paid || '';
-        paidEl.className = 'badge ' + ((data.paid || '').toLowerCase().includes('paid') ? 'ok' : 'warn');
-        tbody.innerHTML = '';
-        (data.breakdown || []).forEach(row => {
-          const tr = document.createElement('tr');
-          tr.innerHTML = `<td style="padding:4px 4px 4px 0;">${row.label || ''}</td>
-                          <td style="padding:4px 0 4px 4px; text-align:right;">${row.amount_fmt || ''}</td>`;
-          tbody.appendChild(tr);
-        });
-        invModal.classList.add('open'); invModal.setAttribute('aria-hidden','false');
-      }
-      function closeInvoiceModal(){ invModal.classList.remove('open'); invModal.setAttribute('aria-hidden','true'); }
+  function openInvoiceModal(data){
+    amountEl.textContent = data.amount || '';
+    stmtEl.textContent = data.statement || '';
+    paidEl.textContent = data.paid || '';
+    paidEl.className = 'chip ' + ((data.paid || '').toLowerCase().includes('paid') ? 'vendor sleek' : 'returned');
+    tbody.innerHTML = '';
+    (data.breakdown || []).forEach(row => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td style="padding:4px 4px 4px 0;">${row.label || ''}</td>
+                      <td style="padding:4px 0 4px 4px; text-align:right;">${row.amount_fmt || ''}</td>`;
+      tbody.appendChild(tr);
+    });
+    invModal.classList.add('open'); invModal.setAttribute('aria-hidden','false');
+  }
+  function closeInvoiceModal(){ invModal.classList.remove('open'); invModal.setAttribute('aria-hidden','true'); }
 
-      document.querySelectorAll('.inv-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-          let breakdown = [];
-          try { breakdown = JSON.parse(btn.dataset.breakdown || '[]'); } catch(e){}
-          openInvoiceModal({
-            order: btn.dataset.order,
-            amount: btn.dataset.amount,
-            statement: btn.dataset.statement,
-            paid: btn.dataset.paid,
-            breakdown: breakdown
-          });
-        });
+  document.querySelectorAll('.inv-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      let breakdown = [];
+      try { breakdown = JSON.parse(btn.dataset.breakdown || '[]'); } catch(e){}
+      openInvoiceModal({
+        order: btn.dataset.order,
+        amount: btn.dataset.amount,
+        statement: btn.dataset.statement,
+        paid: btn.dataset.paid,
+        breakdown: breakdown
       });
-      invBackdrop.addEventListener('click', closeInvoiceModal);
-      invClose.addEventListener('click', closeInvoiceModal);
-      document.addEventListener('keydown', (e)=>{ if(e.key === 'Escape') closeInvoiceModal(); });
+    });
+  });
+  invBackdrop.addEventListener('click', closeInvoiceModal);
+  invClose.addEventListener('click', closeInvoiceModal);
+  document.addEventListener('keydown', e => { if(e.key === 'Escape') closeInvoiceModal(); });
 
-      // ----- Paid toggle -----
-      document.querySelectorAll('.paid-btn').forEach(btn => {
-        btn.addEventListener('click', async () => {
-          const order = btn.dataset.order;
-          const current = btn.dataset.paid === '1';
-          const next = !current;
-          btn.disabled = true;
-          try {
-            const r = await fetch('/api/toggle_paid', {
-              method: 'POST',
-              headers: {'Content-Type':'application/json'},
-              body: JSON.stringify({order_id: order, paid: next})
-            });
-            const j = await r.json();
-            if (j.ok) {
-              btn.dataset.paid = j.paid ? '1' : '0';
-              btn.textContent = j.paid ? 'Paid ✓' : 'Mark as Paid';
-              location.reload(); // refresh cards/stats
-            } else {
-              alert('Error: ' + (j.error || 'Unknown'));
-            }
-          } catch (e) {
-            alert('Network error');
-          } finally {
-            btn.disabled = false;
-          }
+  // ----- Paid toggle -----
+  document.querySelectorAll('.paid-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const order = btn.dataset.order;
+      const current = btn.dataset.paid === '1';
+      const next = !current;
+      btn.disabled = true;
+      try {
+        const r = await fetch('/api/toggle_paid', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({order_id: order, paid: next})
         });
-      });
-
-      // ----- Cost modal (with Vendor) -----
-      const costModal = document.getElementById('cost-modal');
-      const costBackdrop = costModal.querySelector('.modal-backdrop');
-      const costClose = document.getElementById('cm-close');
-      const costCancel = document.getElementById('cm-cancel');
-      const costSave = document.getElementById('cm-save');
-      const costDesc = document.getElementById('cm-desc');
-      const inputPC = document.getElementById('cm-pc');
-      const inputPKG = document.getElementById('cm-pkg');
-      const selectVendor = document.getElementById('cm-vendor');
-      let currentKey = null;
-
-      function openCostModal(key, title){
-        currentKey = key;
-        costDesc.textContent = title || key;
-        inputPC.value = '';
-        inputPKG.value = '';
-        selectVendor.value = 'Other';
-        costModal.classList.add('open'); costModal.setAttribute('aria-hidden','false');
-      }
-      function closeCostModal(){ costModal.classList.remove('open'); costModal.setAttribute('aria-hidden','true'); }
-
-      document.querySelectorAll('.set-cost').forEach(btn => {
-        btn.addEventListener('click', () => openCostModal(btn.dataset.key, btn.dataset.title));
-      });
-      costBackdrop.addEventListener('click', closeCostModal);
-      costClose.addEventListener('click', closeCostModal);
-      costCancel.addEventListener('click', closeCostModal);
-
-      costSave.addEventListener('click', async () => {
-        const pc = inputPC.value.trim();
-        const pk = inputPKG.value.trim();
-        const vendor = selectVendor.value;
-        if (!currentKey) return;
-        if (!pc || !pk) { alert('Enter both Product Cost and Packaging.'); return; }
-        costSave.disabled = true;
-        try {
-          const r = await fetch('/api/save_cost', {
-            method: 'POST',
-            headers: {'Content-Type':'application/json'},
-            body: JSON.stringify({key: currentKey, product_cost: pc, packaging: pk, vendor})
-          });
-          const j = await r.json();
-          if (j.ok) {
-            location.reload(); // show new totals + update cards
-          } else {
-            alert('Error: ' + (j.error || 'Unknown'));
-          }
-        } catch (e) {
-          alert('Network error');
-        } finally {
-          costSave.disabled = false;
+        const j = await r.json();
+        if (j.ok) {
+          btn.dataset.paid = j.paid ? '1' : '0';
+          btn.textContent = j.paid ? 'Paid ✓' : 'Mark as Paid';
+          location.reload();
+        } else {
+          alert('Error: ' + (j.error || 'Unknown'));
         }
+      } catch(e){ alert('Network error'); }
+      finally{ btn.disabled = false; }
+    });
+  });
+
+  // ----- Cost modal -----
+  const costModal = document.getElementById('cost-modal');
+  const costBackdrop = costModal.querySelector('.modal-backdrop');
+  const costClose = document.getElementById('cm-close');
+  const costCancel = document.getElementById('cm-cancel');
+  const costSave = document.getElementById('cm-save');
+  const costDesc = document.getElementById('cm-desc');
+  const inputPC = document.getElementById('cm-pc');
+  const inputPKG = document.getElementById('cm-pkg');
+  const selectVendor = document.getElementById('cm-vendor');
+  let currentKey = null;
+
+  function openCostModal(key, title){
+    currentKey = key;
+    costDesc.textContent = title || key;
+    inputPC.value = ''; inputPKG.value = ''; selectVendor.value = 'Other';
+    costModal.classList.add('open'); costModal.setAttribute('aria-hidden','false');
+  }
+  function closeCostModal(){ costModal.classList.remove('open'); costModal.setAttribute('aria-hidden','true'); }
+
+  document.querySelectorAll('.set-cost').forEach(btn => {
+    btn.addEventListener('click', () => openCostModal(btn.dataset.key, btn.dataset.title));
+  });
+  costBackdrop.addEventListener('click', closeCostModal);
+  costClose.addEventListener('click', closeCostModal);
+  costCancel.addEventListener('click', closeCostModal);
+
+  costSave.addEventListener('click', async () => {
+    const pc = inputPC.value.trim();
+    const pk = inputPKG.value.trim();
+    const vendor = selectVendor.value;
+    if (!currentKey) return;
+    if (!pc || !pk) { alert('Enter both Product Cost and Packaging.'); return; }
+    costSave.disabled = true;
+    try {
+      const r = await fetch('/api/save_cost', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({key: currentKey, product_cost: pc, packaging: pk, vendor})
       });
-      document.addEventListener('keydown', (e)=>{ if(e.key === 'Escape') closeCostModal(); });
-    })();
-  </script>
+      const j = await r.json();
+      if (j.ok) location.reload(); else alert('Error: ' + (j.error || 'Unknown'));
+    } catch(e){ alert('Network error'); }
+    finally{ costSave.disabled = false; }
+  });
+  document.addEventListener('keydown', e => { if(e.key==='Escape') closeCostModal(); });
+})();
+</script>
 </body>
 </html>
