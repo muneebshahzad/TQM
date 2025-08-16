@@ -27,6 +27,17 @@ PAID_FILE  = "vendor_paid.json"     # { order_id: true/false }
 VENDOR_CHOICES = ["Tick Bags", "Sleek Space", "Other"]
 
 app = Flask(__name__)
+@app.template_filter('first_words')
+def first_words(s, n=3):
+    """Return the first n words of s, adding … if truncated."""
+    if not s:
+        return ""
+    parts = str(s).split()
+    n = int(n)
+    trimmed = " ".join(parts[:n])
+    return trimmed + ("…" if len(parts) > n else "")
+
+
 client = LazopClient(ENDPOINT, APP_KEY, APP_SECRET)
 
 # ---------- helpers ----------
@@ -301,10 +312,15 @@ def _build_runtime_view(filtered_raw):
         # finance (ensure cached on RAW_ORDERS_CACHE)
         net_num, inv_fmt, statement, paid_status, breakdown = _ensure_finance(base)
 
+        # Is whole order returned?
+        order_statuses = [str(s or "").lower() for s in (base.get("statuses") or [])]
+        is_order_returned = any(s == "returned" or "return" in s for s in order_statuses)
+
         # recompute costs from latest JSON
-        prod_total = Decimal("0")
-        pack_total = Decimal("0")
+        prod_total_eff = Decimal("0")   # effective product cost (0 if returned)
+        pack_total     = Decimal("0")
         items = []
+
         for it in base.get("items_list", []):
             key = it.get("key")
             rec = costs.get(key) if key else None
@@ -313,8 +329,15 @@ def _build_runtime_view(filtered_raw):
             vend = (rec.get("vendor") if rec else "") or "Other"
             qty = _d(it.get("quantity") or 1)
 
-            prod_total += pc * qty
-            pack_total += pk * qty
+            # Item is returned if order is returned OR the item's status says returned
+            status_text = (it.get("status") or "").lower()
+            is_item_returned = is_order_returned or ("return" in status_text)
+
+            # Effective product cost is 0 for returned items
+            eff_pc = Decimal("0") if is_item_returned else pc
+
+            prod_total_eff += eff_pc * qty
+            pack_total     += pk * qty
 
             items.append({
                 **it,
@@ -322,9 +345,10 @@ def _build_runtime_view(filtered_raw):
                 "packaging": str(pk),
                 "vendor": vend,
                 "needs_cost": (rec is None),
+                "is_returned": is_item_returned,   # expose to UI and stats
             })
 
-        net_profit_num = net_num - prod_total - pack_total
+        net_profit_num = net_num - prod_total_eff - pack_total
 
         view.append({
             "order_id": base["order_id"],
@@ -337,13 +361,14 @@ def _build_runtime_view(filtered_raw):
             "invoice_amount_num": str(net_num),
             "invoice_breakdown": breakdown,
             "items_list": items,
-            "product_cost_total": _fmt_pkr(prod_total),
+            "product_cost_total": _fmt_pkr(prod_total_eff),   # effective total (0 for returns)
             "packaging_total": _fmt_pkr(pack_total),
             "net_profit": _fmt_pkr(net_profit_num),
             "net_profit_num": str(net_profit_num),
             "vendor_paid": bool(paid.get(base["order_id"], False)),
         })
     return view
+
 
 def _within_range(od: str, start: str | None, end: str | None) -> bool:
     """od, start, end are 'YYYY-MM-DD' strings."""
@@ -367,12 +392,9 @@ def _within_range(od: str, start: str | None, end: str | None) -> bool:
 
 def _compute_stats(orders_view):
     """
-    Returns dict with:
-      payables_total, payables_tick, payables_sleek, payables_other,
-      net_profit_collected
     Payables are computed ONLY over unpaid orders (vendor_paid == False).
-    Vendor split is based on per-item vendor from product_costs.json.
-    Net profit collected = sum(net_profit) where finance paid_status == 'Paid'.
+    For returned items, only packaging is payable (product cost waived).
+    Net profit collected = sum(net profit) where finance paid_status == 'Paid'.
     """
     payables_total = Decimal("0")
     split = {"Tick Bags": Decimal("0"), "Sleek Space": Decimal("0"), "Other": Decimal("0")}
@@ -386,12 +408,14 @@ def _compute_stats(orders_view):
                 pc  = _d(it.get("product_cost"))
                 pk  = _d(it.get("packaging"))
                 vendor = (it.get("vendor") or "Other")
-                line = (pc + pk) * qty
+                # Returned: only pay packaging
+                line = (pk * qty) if it.get("is_returned") else ((pc + pk) * qty)
                 payables_total += line
                 if vendor not in split:
                     split["Other"] += line
                 else:
                     split[vendor] += line
+
         # collected net profit (only if finance marked Paid)
         if str(o.get("paid_status","")).lower().startswith("paid"):
             net_profit_collected += _d(o.get("net_profit_num") or 0)
@@ -403,6 +427,7 @@ def _compute_stats(orders_view):
         "payables_other": _fmt_pkr(split["Other"]),
         "net_profit_collected": _fmt_pkr(net_profit_collected),
     }
+
 
 # ---------- Routes ----------
 @app.route("/")
