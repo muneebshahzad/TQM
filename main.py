@@ -17,7 +17,7 @@ CREATED_AFTER_DISPLAY = "2025-07-06"
 # All statuses EXCEPT "canceled"
 STATUSES_EXCEPT_CANCELED = [
     "unpaid", "pending", "ready_to_ship", "shipped", "delivered",
-    "returned", "failed", "topack", "toship", "packed"
+    "returned", "failed", "topack", "toship", "packed", "shipped_back_success"
 ]
 
 # Local storage files
