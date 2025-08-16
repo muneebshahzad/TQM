@@ -314,7 +314,7 @@ def _build_runtime_view(filtered_raw):
 
         # Is whole order returned?
         order_statuses = [str(s or "").lower() for s in (base.get("statuses") or [])]
-        is_order_returned = any(s == "returned" or "return" in s for s in order_statuses)
+        is_order_returned = any(s == "returned" or "shipped_back_success" in s for s in order_statuses)
 
         # recompute costs from latest JSON
         prod_total_eff = Decimal("0")   # effective product cost (0 if returned)
