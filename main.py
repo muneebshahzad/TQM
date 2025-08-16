@@ -5,7 +5,7 @@ from flask import Flask, render_template, request, jsonify
 from lazop import LazopClient, LazopRequest  # Lazop, matching your sample
 
 # ---- CONFIG ----
-ENDPOINT     = os.getenv("DARAZ_ENDPOINT")
+ENDPOINT     = os.getenv("DARAZ_ENDPOINT", "https://api.daraz.pk/rest")
 APP_KEY      = os.getenv("DARAZ_APP_KEY")
 APP_SECRET   = os.getenv("DARAZ_APP_SECRET")
 ACCESS_TOKEN = os.getenv("DARAZ_ACCESS_TOKEN")
