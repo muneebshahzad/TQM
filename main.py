@@ -1,526 +1,751 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Daraz TQM Dashboard</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
-    <style>
-        body { font-family: 'Inter', sans-serif; background-color: #f7f9fb; }
-        .card { transition: all 0.3s ease; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.06); }
-        .card:hover { box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1); transform: translateY(-2px); }
-        .row { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px dashed #e5e7eb; }
-        .row:last-child { border-bottom: none; }
-        .modal-overlay { background-color: rgba(0, 0, 0, 0.5); z-index: 50; }
-        .modal-content { max-height: 80vh; max-width: 90vw; }
-        .data-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem; }
-        .data-grid > div { background: white; padding: 1rem; border-radius: 0.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-    </style>
-</head>
-<body class="p-4 sm:p-8">
+import asyncio
+import os
+import smtplib
+import time
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from flask import Flask, render_template, jsonify, request, flash, redirect, url_for, abort
+import datetime, requests
+from datetime import datetime
+import pymssql, shopify
+import aiohttp
+import lazop
+import aiohttp
 
-    <!-- Header and Controls -->
-    <header class="mb-8">
-        <h1 class="text-3xl font-bold text-gray-800">Daraz TQM Dashboard / Vendor Payment Tracker</h1>
-        <form id="filter-form" class="flex flex-col sm:flex-row items-end gap-3 mt-4 bg-white p-4 rounded-lg shadow-sm">
-            <div class="flex flex-col flex-grow w-full sm:w-auto">
-                <label for="from" class="text-sm font-medium text-gray-600">Order Date From:</label>
-                <input type="date" id="from" name="from" value="{{ created_after }}"
-                       class="mt-1 p-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500">
-            </div>
-            <div class="flex flex-col flex-grow w-full sm:w-auto">
-                <label for="to" class="text-sm font-medium text-gray-600">Order Date To (Optional):</label>
-                <input type="date" id="to" name="to" value="{{ created_before }}"
-                       class="mt-1 p-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500">
-            </div>
-            <button type="submit"
-                    class="w-full sm:w-auto px-4 py-2 bg-indigo-600 text-white font-semibold rounded-md shadow-md hover:bg-indigo-700 transition duration-150">
-                Apply Filter
-            </button>
-        </form>
-    </header>
-
-    <!-- Stat Cards -->
-    <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-
-        <!-- Net Payables (Liability Card) -->
-        <div class="card p-5 bg-white rounded-xl border border-gray-200">
-            <h3 class="text-lg font-semibold text-gray-700 mb-2">Net Vendor Payables</h3>
-            <p class="text-2xl font-bold {{ 'text-red-600' if stats.net_payables_raw is defined and stats.net_payables_raw > 0 else 'text-green-600' }}">
-                {{ stats.net_payables }}
-            </p>
-            <p class="text-sm text-gray-500 mt-2">Total Liability - Payments Made
-            </p>
-            <button onclick="openPaymentModal()"
-                    class="mt-3 text-indigo-600 hover:text-indigo-800 text-sm font-medium">
-                Record New Payment
-            </button>
-        </div>
-
-        <!-- Total Vendor Cost (Liability Breakdown) -->
-        <div class="card p-5 bg-white rounded-xl border border-gray-200">
-            <h3 class="text-lg font-semibold text-gray-700 mb-2">Total Vendor Cost Liability</h3>
-            <div class="card-content">
-                <div class="row text-lg font-bold"><span>Total Cost</span><span class="text-gray-900">{{ stats.vendor_cost_total }}</span></div>
-                <div class="row text-sm text-gray-500 mt-1"><span>- Tick Bags Liability</span><span>{{ stats.payables_tick }}</span></div>
-                <div class="row text-sm text-gray-500"><span>- Sleek Space Liability</span><span>{{ stats.payables_sleek }}</span></div>
-            </div>
-            <p class="text-sm text-gray-500 mt-2">Total Cost of Goods & Packaging</p>
-        </div>
-
-        <!-- Total Payments Made -->
-        <div class="card p-5 bg-white rounded-xl border border-gray-200">
-            <h3 class="text-lg font-semibold text-gray-700 mb-2">Total Payments Recorded</h3>
-            <p class="text-2xl font-bold text-green-600">
-                {{ stats.total_paid }}
-            </p>
-            <p class="text-sm text-gray-500 mt-2">Historic Payments to Vendors</p>
-            <button onclick="openHistoryModal()"
-                    class="mt-3 text-indigo-600 hover:text-indigo-800 text-sm font-medium">
-                View Payment History
-            </button>
-        </div>
-
-        <!-- Net Profit Collected -->
-        <div class="card p-5 bg-white rounded-xl border border-gray-200">
-            <h3 class="text-lg font-semibold text-gray-700 mb-2">Net Profit Collected</h3>
-            <p class="text-2xl font-bold text-blue-600">
-                {{ stats.net_profit_collected }}
-            </p>
-            <p class="text-sm text-gray-500 mt-2">Profit from Paid/Settled Orders (After Daraz Fees)</p>
-        </div>
-
-    </div>
-
-    <!-- Order List -->
-    <div class="bg-white rounded-xl shadow-lg p-6">
-        <h2 class="text-2xl font-semibold text-gray-800 mb-4">{{ orders | length }} Orders Found</h2>
-        <div class="overflow-x-auto">
-            <table class="min-w-full divide-y divide-gray-200">
-                <thead>
-                    <tr class="bg-gray-50 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        <th class="px-3 py-3 text-left">Order ID / Date</th>
-                        <th class="px-3 py-3 text-left">Customer / Address</th>
-                        <th class="px-3 py-3 text-right">Invoice Status</th>
-                        <th class="px-3 py-3 text-right">Net Received</th>
-                        <th class="px-3 py-3 text-right">Vendor Cost</th>
-                        <th class="px-3 py-3 text-right">Net Profit</th>
-                        <th class="px-3 py-3 text-center">Items</th>
-                    </tr>
-                </thead>
-                <tbody class="bg-white divide-y divide-gray-200">
-                    {% for order in orders %}
-                    <tr class="hover:bg-gray-50">
-                        <td class="px-3 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                            {{ order.order_id }}<br>
-                            <span class="text-xs text-gray-500">{{ order.order_date }}</span>
-                        </td>
-                        <td class="px-3 py-4 whitespace-nowrap text-sm text-gray-500">
-                            <strong>{{ order.customer.name }}</strong><br>
-                            <span class="text-xs">{{ order.customer.address | first_words(6) }}</span>
-                        </td>
-                        <td class="px-3 py-4 whitespace-nowrap text-right">
-                            <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full
-                                {% if 'Paid' in order.paid_status %} bg-green-100 text-green-800
-                                {% elif 'Not Paid' in order.paid_status %} bg-yellow-100 text-yellow-800
-                                {% else %} bg-red-100 text-red-800
-                                {% endif %}"
-                            >
-                                {{ order.paid_status }}
-                            </span>
-                            <br>
-                            <span class="text-xs text-gray-500">{{ order.statement | first_words(4) }}</span>
-                        </td>
-                        <td class="px-3 py-4 whitespace-nowrap text-sm text-right text-gray-900 font-medium">
-                            {{ order.invoice_amount }}
-                        </td>
-                        <td class="px-3 py-4 whitespace-nowrap text-sm text-right text-red-600 font-medium">
-                            {{ order.product_cost_total }}<br>
-                            <span class="text-xs text-gray-500">+ {{ order.packaging_total }} (Pkg)</span>
-                        </td>
-                        <td class="px-3 py-4 whitespace-nowrap text-sm text-right font-bold
-                            {% if order.net_profit_num | float < 0 %} text-red-700 {% else %} text-green-700 {% endif %}">
-                            {{ order.net_profit }}
-                        </td>
-                        <td class="px-3 py-4 whitespace-nowrap text-center text-sm">
-                            <button onclick="openDetailModal({{ order.order_id }})"
-                                class="text-indigo-600 hover:text-indigo-900 text-sm font-medium">
-                                {{ order.items_list | length }} Item(s)
-                            </button>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% if not orders %}
-        <p class="text-center text-gray-500 py-10">No orders found matching your criteria.</p>
-        {% endif %}
-    </div>
+app = Flask(__name__)
+app.debug = True
+app.secret_key = os.getenv('APP_SECRET_KEY', 'default_secret_key')  # Use environment variable
 
 
-    <!-- Modals (Hidden by default) -->
-    <div id="detail-modal-overlay" class="modal-overlay fixed inset-0 hidden items-center justify-center">
-        <div id="detail-modal" class="bg-white rounded-xl shadow-2xl p-6 w-11/12 md:w-4/5 lg:w-3/5 modal-content overflow-y-auto transform scale-95 transition-transform">
-            <div class="flex justify-between items-start mb-4 border-b pb-2">
-                <h3 class="text-xl font-bold text-gray-800">Order Details: <span id="modal-order-id" class="text-indigo-600"></span></h3>
-                <button onclick="closeDetailModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
-            </div>
-            <div id="modal-content-area" class="space-y-6">
-                <!-- Content will be injected here -->
-            </div>
-        </div>
-    </div>
-
-    <!-- Record Payment Modal -->
-    <div id="payment-modal-overlay" class="modal-overlay fixed inset-0 hidden items-center justify-center">
-        <div class="bg-white rounded-xl shadow-2xl p-6 w-11/12 md:w-1/3 modal-content overflow-y-auto transform scale-95 transition-transform">
-            <div class="flex justify-between items-start mb-4 border-b pb-2">
-                <h3 class="text-xl font-bold text-gray-800">Record Vendor Payment</h3>
-                <button onclick="closePaymentModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
-            </div>
-            <form id="record-payment-form" class="space-y-4">
-                <div>
-                    <label for="payment-vendor" class="block text-sm font-medium text-gray-700">Vendor</label>
-                    <select id="payment-vendor" name="vendor" required
-                            class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
-                        {% for vendor in vendors %}
-                        <option value="{{ vendor }}">{{ vendor }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <div>
-                    <label for="payment-amount" class="block text-sm font-medium text-gray-700">Amount (PKR)</label>
-                    <input type="number" id="payment-amount" name="amount" step="0.01" min="0.01" required
-                           class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2">
-                </div>
-                <div>
-                    <label for="payment-date" class="block text-sm font-medium text-gray-700">Payment Date</label>
-                    <!-- The value attribute was removed and is now set by JavaScript -->
-                    <input type="date" id="payment-date" name="date" required
-                           class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2">
-                </div>
-                <button type="submit" id="payment-submit-btn"
-                        class="w-full px-4 py-2 border border-transparent rounded-md shadow-sm text-base font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
-                    Record Payment
-                </button>
-                <div id="payment-message" class="text-center mt-3 hidden"></div>
-            </form>
-        </div>
-    </div>
-
-    <!-- Payment History Modal -->
-    <div id="history-modal-overlay" class="modal-overlay fixed inset-0 hidden items-center justify-center">
-        <div class="bg-white rounded-xl shadow-2xl p-6 w-11/12 md:w-2/3 lg:w-2/5 modal-content overflow-y-auto transform scale-95 transition-transform">
-            <div class="flex justify-between items-start mb-4 border-b pb-2">
-                <h3 class="text-xl font-bold text-gray-800">Vendor Payment History</h3>
-                <button onclick="closeHistoryModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
-            </div>
-            <div id="history-content-area" class="space-y-3">
-                <!-- History will be injected here -->
-                <p class="text-gray-500 text-center py-4" id="history-loading">Loading payment history...</p>
-            </div>
-            <div id="history-message" class="text-center mt-3 hidden"></div>
-        </div>
-    </div>
+def get_db_connection():
+    server = os.getenv('DB_SERVER')
+    database = os.getenv('DB_DATABASE')
+    username = os.getenv('DB_USERNAME')
+    password = os.getenv('DB_PASSWORD')
+    try:
+        connection = pymssql.connect(server=server, user=username, password=password, database=database)
+        return connection
+    except pymssql.Error as e:
+        print(f"Error connecting to the database: {str(e)}")
+        return None
 
 
-<script type="text/javascript">
-    // Helper function to find order data by ID
-    const ORDERS_DATA = JSON.parse('{{ orders | tojson }}');
 
-    function getOrderData(orderId) {
-        return ORDERS_DATA.find(o => String(o.order_id) === String(orderId));
-    }
+def check_database_connection():
+    server = 'tickbags.database.windows.net'
+    database = 'TickBags'
+    username = 'tickbags_ltd'
+    password = 'TB@2024!'
 
-    function _d(x) {
-        try {
-            return parseFloat(String(x).replace(/[^0-9.-]/g, '')) || 0;
-        } catch {
-            return 0;
-        }
-    }
+    try:
+        print('Connecting to the database...')
+        connection = pymssql.connect(server=server, user=username, password=password, database=database)
 
-    // --- Detail Modal Functions ---
+        print('Connected to the database')
+        return connection
+    except pymssql.Error as e:
+        print(f"Error connecting to the database: {str(e)}")
+        time.sleep(5)
+        check_database_connection()
+        return None
 
-    function renderDetailContent(order) {
-        let content = `
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-                <div>
-                    <p class="font-semibold text-gray-700">Customer Info:</p>
-                    <p>${order.customer.name}</p>
-                    <p class="text-xs text-gray-500">${order.customer.address}</p>
-                    <p class="text-xs text-gray-500">${order.customer.phone}</p>
-                </div>
-                <div>
-                    <p class="font-semibold text-gray-700">Financial Summary:</p>
-                    <div class="row text-xs"><span>Order Price:</span><span>${order.price}</span></div>
-                    <div class="row text-xs"><span>Net Received:</span><span class="font-bold">${order.invoice_amount}</span></div>
-                    <div class="row text-xs"><span>Total Product Cost:</span><span class="text-red-600">${order.product_cost_total}</span></div>
-                    <div class="row text-xs"><span>Total Packaging Cost:</span><span class="text-red-600">${order.packaging_total}</span></div>
-                    <div class="row text-xs font-bold mt-1"><span>Net Profit:</span><span class="${_d(order.net_profit_num) < 0 ? 'text-red-700' : 'text-green-700'}">${order.net_profit}</span></div>
-                    <p class="text-xs text-gray-500 mt-2 italic">Statement: ${order.statement || 'N/A'}</p>
-                </div>
-            </div>
 
-            <h4 class="text-lg font-semibold text-gray-700 mt-4 mb-2">Invoice Breakdown (Net Received = Sum of below)</h4>
-            <div class="data-grid text-xs">
-                ${order.invoice_breakdown.map(item => `
-                    <div class="row text-xs"><span>${item.label}:</span><span class="${_d(item.amount_fmt) < 0 ? 'text-red-600' : 'text-green-600'}">${item.amount_fmt}</span></div>
-                `).join('')}
-            </div>
+def fetch_transaction_data():
+    connection = check_database_connection()
+    if connection is None:
+        return []
+    print("CONNECTED TO DATABASE")
 
-            <h4 class="text-lg font-semibold text-gray-700 mt-6 mb-2">Order Items (Status & Costs)</h4>
-            <div class="space-y-4">
-            ${order.items_list.map(item => `
-                <div class="data-grid border p-3 rounded-lg bg-gray-50">
-                    <div class="sm:col-span-2">
-                        <p class="font-bold text-sm">${item.item_title}</p>
-                        <p class="text-xs text-gray-500">SKU: ${item.key}</p>
-                        ${item.is_returned ? '<span class="text-xs font-semibold text-red-600">ITEM RETURNED / FAILED</span>' : ''}
-                    </div>
-                    <div>
-                        <p class="text-xs font-medium text-gray-700">Qty / Status</p>
-                        <p class="text-sm">${item.quantity} / <span class="font-semibold text-indigo-600">${item.status}</span></p>
-                    </div>
-                    <div class="col-span-1 sm:col-span-2">
-                        <p class="text-xs font-medium text-gray-700">Costs & Vendor</p>
-                        <div class="flex justify-between text-xs">
-                            <span>Product Cost:</span>
-                            <span class="${item.is_returned ? 'line-through text-gray-400' : 'text-red-600'}">PKR ${item.product_cost}</span>
-                        </div>
-                        <div class="flex justify-between text-xs">
-                            <span>Packaging Cost:</span>
-                            <span class="text-red-600">PKR ${item.packaging}</span>
-                        </div>
-                        <div class="flex justify-between text-xs mt-1">
-                            <span>Vendor:</span>
-                            <span class="font-semibold text-gray-700">${item.vendor || 'Other'}</span>
-                        </div>
-                        ${item.needs_cost ? `
-                        <div class="mt-2 p-2 bg-yellow-100 text-yellow-800 rounded-md text-xs">
-                            ⚠️ Cost is missing. Please update.
-                        </div>
-                        <form onsubmit="saveItemCost(event, '${item.key}')" class="mt-2 space-y-1 text-xs">
-                            <input type="hidden" name="key" value="${item.key}">
-                            <input type="number" name="product_cost" placeholder="Product Cost" step="0.01" value="${item.product_cost}" class="w-full p-1 border rounded-md">
-                            <input type="number" name="packaging" placeholder="Packaging Cost" step="0.01" value="${item.packaging}" class="w-full p-1 border rounded-md">
-                            <select name="vendor" class="w-full p-1 border rounded-md">
-                                {% for vendor in vendors %}
-                                <option value="{{ vendor }}" ${item.vendor === '{{ vendor }}' ? 'selected' : ''}>{{ vendor }}</option>
-                                {% endfor %}
-                            </select>
-                            <button type="submit" class="w-full bg-indigo-500 text-white py-1 rounded-md hover:bg-indigo-600">Save Cost</button>
-                        </form>
-                        ` : ''}
-                    </div>
-                </div>
-            `).join('')}
-            </div>
-        `;
-        document.getElementById('modal-content-area').innerHTML = content;
-    }
+    try:
+        with connection.cursor(as_dict=True) as cursor:
+            query = '''SELECT * FROM IncomeExpenseTable ORDER BY "Payment_Date" desc'''
+            cursor.execute(query)
+            transactions = cursor.fetchall()
+            return transactions
+    except pymssql.Error as e:
+        print(f"Error fetching data from the database: {str(e)}")
+        return []
+    finally:
+        connection.close()
 
-    function openDetailModal(orderId) {
-        const order = getOrderData(orderId);
-        if (!order) {
-            console.error('Order not found:', orderId);
-            return;
+
+def format_date(date_str):
+    # Parse the date string
+    date_obj = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S %z")
+    # Format the date object to only show the date
+    return date_obj.strftime("%Y-%m-%d")
+
+
+@app.route('/finance_report')
+def finance_report():
+    transactions = fetch_transaction_data()
+    return render_template("finance_report.html", transactions=transactions, account=True)
+
+
+
+def fetch_monthly_financial_data(connection):
+    cursor = connection.cursor()
+
+    try:
+        cursor.execute("SELECT Month, NetProfit FROM MonthlySummary ORDER BY Month ASC")
+        financial_data = cursor.fetchall()
+
+        formatted_data = {
+            'months': [row[0] for row in financial_data],
+            'net_amounts': [row[1] for row in financial_data]
         }
 
-        document.getElementById('modal-order-id').textContent = orderId;
-        renderDetailContent(order);
-        document.getElementById('detail-modal-overlay').classList.remove('hidden');
-        document.getElementById('detail-modal-overlay').classList.add('flex');
-    }
+        return formatted_data
 
-    function closeDetailModal() {
-        document.getElementById('detail-modal-overlay').classList.add('hidden');
-        document.getElementById('detail-modal-overlay').classList.remove('flex');
-    }
+    except Exception as e:
+        print(f"Error fetching monthly financial data: {str(e)}")
+        return {'months': [], 'net_amounts': []}
 
-    async function saveItemCost(event, itemKey) {
-        event.preventDefault();
-        const form = event.target;
-        const key = form.elements['key'].value;
-        const product_cost = form.elements['product_cost'].value;
-        const packaging = form.elements['packaging'].value;
-        const vendor = form.elements['vendor'].value;
+    finally:
+        cursor.close()
 
-        try {
-            const response = await fetch('/api/save_cost', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ key, product_cost, packaging, vendor })
-            });
 
-            const result = await response.json();
-            if (result.ok) {
-                // Simplified success: just show a message and disable the form
-                const saveButton = form.querySelector('button[type="submit"]');
-                if (saveButton) {
-                    saveButton.textContent = 'Saved!';
-                    saveButton.classList.remove('bg-indigo-500', 'hover:bg-indigo-600');
-                    saveButton.classList.add('bg-green-500');
-                    saveButton.disabled = true;
-                }
-                // Optional: Reload the page to refresh all data if needed, but we'll rely on the manual reload for now
-                // window.location.reload();
-            } else {
-                alert('Failed to save cost: ' + result.error);
+def fetch_account_summary(connection):
+    cursor = connection.cursor()
+
+    try:
+        # Fetch Cash on Hand (assuming it's stored in the 'accounts' table)
+        cursor.execute(
+            "SELECT FORMAT(accounts_balance, 'N0') as FormattedAmount   FROM accounts WHERE accounts_name='Bank'")
+        cash_on_hand = cursor.fetchone()[0]
+
+        # Fetch Earnings (Monthly)
+        cursor.execute("""
+            SELECT FORMAT(Income, 'N0') as FormattedAmount
+            FROM MonthlySummary
+            WHERE [Month] = FORMAT(GETDATE(), 'yyyy-MM')
+        """)
+        earnings_monthly = cursor.fetchone()[0] or 0
+
+        # Fetch Expenses (Monthly)
+        cursor.execute("""
+            SELECT FORMAT(Expense, 'N0') as FormattedAmount
+            FROM MonthlySummary
+            WHERE [Month] = FORMAT(GETDATE(), 'yyyy-MM')
+        """)
+        expenses_monthly = cursor.fetchone()[0] or 0
+
+        # Calculate Net Profit (Including Withdrawal)
+        cursor.execute("""
+            SELECT FORMAT(NetProfit, 'N0') AS FormattedAmount
+            FROM MonthlySummary
+            WHERE [Month] = FORMAT(GETDATE(), 'yyyy-MM')
+        """)
+        net_profit = cursor.fetchone()[0] or 0
+
+        return {
+            'cash_on_hand': cash_on_hand,
+            'earnings_monthly': earnings_monthly,
+            'expenses_monthly': expenses_monthly,
+            'net_profit': net_profit
+        }
+
+    except Exception as e:
+        print(f"Error fetching account summary: {str(e)}")
+        return {}
+
+    finally:
+        cursor.close()
+
+
+def fetch_accounts_data(connection):
+    cursor = connection.cursor()
+
+    try:
+        cursor.execute(
+            'SELECT accounts_name, accounts_balance FROM accounts order by accounts_balance desc')  # Adjust the query accordingly
+        accounts_data = cursor.fetchall()
+
+        formatted_accounts = []
+
+        for row in accounts_data:
+            formatted_account = {
+                'person_name': row[0],
+                'balance': int(row[1]),
+
             }
-        } catch (error) {
-            console.error('Save cost error:', error);
-            alert('An unexpected error occurred while saving the cost.');
+
+            formatted_accounts.append(formatted_account)
+
+        return formatted_accounts
+
+    except Exception as e:
+        print(f"Error fetching accounts data: {str(e)}")
+        return []
+
+    finally:
+        cursor.close()
+
+
+def fetch_income_list(connection):
+    cursor = connection.cursor()
+
+    try:
+        # Execute the SQL query
+        query = '''
+
+SELECT TOP 5
+    Income_Expense_Name,
+    SUM(CAST(Amount AS FLOAT)) AS Amount
+FROM IncomeExpenseTable
+WHERE Type = 'Income'
+    AND FORMAT(CONVERT(datetime, Payment_Date, 120), 'yyyy-MM') = FORMAT(GETDATE(), 'yyyy-MM')
+GROUP BY Income_Expense_Name
+ORDER BY Amount DESC
+
+
+        '''
+        cursor.execute(query)
+        summary_data = cursor.fetchall()
+
+        formatted_data = {
+            'income': [row[0] for row in summary_data],
+            'net_amounts': [row[1] for row in summary_data]
         }
-    }
+
+        return formatted_data
 
 
-    // --- Record Payment Modal Functions ---
+    except Exception as e:
+        print(f"Error fetching income and expense summary: {str(e)}")
+        return [], []
 
-    function openPaymentModal() {
-        document.getElementById('payment-modal-overlay').classList.remove('hidden');
-        document.getElementById('payment-modal-overlay').classList.add('flex');
-        document.getElementById('payment-message').classList.add('hidden');
-        // Set default date to today using JavaScript
-        const today = new Date().toISOString().split('T')[0];
-        document.getElementById('payment-date').value = today;
-    }
+    finally:
+        cursor.close()
 
-    function closePaymentModal() {
-        document.getElementById('payment-modal-overlay').classList.add('hidden');
-        document.getElementById('payment-modal-overlay').classList.remove('flex');
-    }
 
-    document.getElementById('record-payment-form').addEventListener('submit', async function(event) {
-        event.preventDefault();
-        const form = event.target;
-        const submitBtn = document.getElementById('payment-submit-btn');
-        const messageDiv = document.getElementById('payment-message');
-        messageDiv.classList.add('hidden');
+def fetch_expenses(connection):
+    cursor = connection.cursor()
+    try:
+        cursor.execute("""
+                   SELECT TOP 5
+    Income_Expense_Name,
+    SUM(CAST(Amount AS FLOAT)) AS Amount
+FROM IncomeExpenseTable
+WHERE Type = 'Expense'
+    AND FORMAT(CONVERT(datetime, Payment_Date, 120), 'yyyy-MM') = FORMAT(GETDATE(), 'yyyy-MM')
+GROUP BY Income_Expense_Name
+ORDER BY Amount DESC;
 
-        submitBtn.disabled = true;
-        submitBtn.textContent = 'Recording...';
+                """, )
 
-        const vendor = form.elements['vendor'].value;
-        const amount = form.elements['amount'].value;
-        const date = form.elements['date'].value;
+        summary_data = cursor.fetchall()
+        formatted_data = {
+            'expense': [row[0] for row in summary_data],
+            'net_amounts': [row[1] for row in summary_data]
+        }
 
-        try {
-            const response = await fetch('/api/record_payment', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ vendor, amount: parseFloat(amount), date })
-            });
+        return formatted_data
 
-            const result = await response.json();
+    except Exception as e:
+        print(f"Error fetching incomes data: {str(e)}")
+        return []
 
-            if (result.ok) {
-                messageDiv.textContent = 'Payment recorded successfully!';
-                messageDiv.classList.remove('hidden', 'text-red-600');
-                messageDiv.classList.add('text-green-600');
-                form.reset();
-                setTimeout(() => {
-                    closePaymentModal();
-                    window.location.reload(); // Hard reload to update stats
-                }, 1500);
-            } else {
-                messageDiv.textContent = 'Error: ' + (result.error || 'Failed to record payment.');
-                messageDiv.classList.remove('hidden', 'text-green-600');
-                messageDiv.classList.add('text-red-600');
+    finally:
+        cursor.close()
+
+
+@app.route('/')
+def accounts():
+    connection = check_database_connection()
+
+    try:
+        if not connection:
+            connection = check_database_connection()
+
+        if connection:
+            financial_data = fetch_monthly_financial_data(connection)
+            accounts = fetch_accounts_data(connection)
+            account_summary = fetch_account_summary(connection)
+            income_data = fetch_income_list(connection)
+            expense_data = fetch_expenses(connection)
+
+            # Debugging print statements
+            print("Financial Data:", financial_data)
+            print("Accounts:", accounts)
+            print("Account Summary:", account_summary)
+            print("Income Data:", income_data)
+            print("Expense Data:", expense_data)
+
+            colors = ['#4e73df', '#1cc88a', '#36b9cc', '#f6c23e', '#e74a3b', '#858796']
+
+            # Handle empty income or expense data gracefully
+            income_list = income_data.get('income', [])
+            expense_list = expense_data.get('expense', [])
+
+            # Ensure the colors don't exceed the income/expense list lengths
+            labeled_colors = list(zip(income_list, colors[:len(income_list)])) if income_list else []
+            labeled_expenses_colors = list(zip(expense_list, colors[:len(expense_list)])) if expense_list else []
+
+            print("Labeled Colors:", labeled_colors)
+            print("Labeled Expenses Colors:", labeled_expenses_colors)
+
+            return render_template('accounts.html',
+                                   labeled_colors=labeled_colors,
+                                   colors=colors,
+                                   accounts=accounts,
+                                   account_summary=account_summary,
+                                   financial_data=financial_data,
+                                   income_data=income_data,
+                                   expense_data=expense_data,
+                                   labeled_expenses_colors=labeled_expenses_colors)
+        else:
+            return render_template('error.html', message="Could not connect to the database. Please try again later.")
+
+    except Exception as e:
+        print(f"Error in account_balances route: {str(e)}")
+        return render_template('error.html', message="An unexpected error occurred. Please try again later.")
+
+    finally:
+        if connection:
+            connection.close()
+
+
+@app.route('/addTransaction')
+def addTransaction():
+    return render_template('addTransaction.html')
+
+
+@app.route('/accounts/<account_name>')
+def accountData(account_name):
+    print(f"Account Name: {account_name}")  # Debug line
+
+    connection = check_database_connection()
+    if connection is None:
+        return "Database connection error", 500  # Return an error message or page if connection fails
+
+    print("CONNECTED TO DATABASE")
+    person= account_name.title()
+    try:
+        with connection.cursor(as_dict=True) as cursor:
+            query = "SELECT * FROM IncomeExpenseTable WHERE Income_Expense_Name LIKE %s ORDER BY Payment_Date DESC"
+            cursor.execute(query, ('%' + account_name + '%',))
+            transactions = cursor.fetchall()
+    except pymssql.Error as e:
+        print(f"Error fetching data from the database: {str(e)}")
+        transactions = []  # Ensure transactions is defined
+    finally:
+        connection.close()
+
+    # Simple template rendering to verify if template works without data
+    return render_template("finance_report.html", transactions=transactions, account=False,person_name=person)
+
+
+@app.route('/expense_data')
+def expense_data():
+    connection = check_database_connection()
+
+    try:
+        if connection:
+            cursor = connection.cursor()
+            cursor.execute("""
+                SELECT e.expense_id, e.expense_title, s.subtype_title
+                FROM ExpenseTypes e
+                LEFT JOIN ExpenseSubtypes s ON e.expense_id = s.expense_id
+            """)
+            rows = cursor.fetchall()
+
+            expense_data = {}
+            for expense_id, expense_title, subtype_title in rows:
+                if expense_id not in expense_data:
+                    expense_data[expense_id] = {
+                        "expense_title": expense_title,
+                        "subtypes": []
+                    }
+                if subtype_title:
+                    expense_data[expense_id]["subtypes"].append(subtype_title)
+
+            # Convert the dictionary to the format needed
+            response_data = {
+                'types': [{'expense_id': k, 'expense_title': v['expense_title']} for k, v in expense_data.items()],
+                'subtypes': {str(k): v['subtypes'] for k, v in expense_data.items()}
             }
-        } catch (error) {
-            messageDiv.textContent = 'An unexpected error occurred.';
-            messageDiv.classList.remove('hidden', 'text-green-600');
-            messageDiv.classList.add('text-red-600');
-            console.error('Payment record error:', error);
-        } finally {
-            submitBtn.disabled = false;
-            submitBtn.textContent = 'Record Payment';
-        }
-    });
+
+            return jsonify(response_data)
+        else:
+            return "Error: No database connection"
+
+    except Exception as e:
+        print(f"Error in expense_data route: {str(e)}")
+        return "Error in expense_data route"
+
+    finally:
+        if connection:
+            connection.close()
 
 
-    // --- Payment History Modal Functions ---
+@app.route('/income_data')
+def income_data():
+    connection = check_database_connection()
 
-    function openHistoryModal() {
-        document.getElementById('history-modal-overlay').classList.remove('hidden');
-        document.getElementById('history-modal-overlay').classList.add('flex');
-        loadPaymentHistory();
-    }
+    try:
+        if connection:
+            cursor = connection.cursor()
+            cursor.execute("""
+                SELECT e.income_id, e.income_title, s.subtype_title
+                FROM incomeTypes e
+                LEFT JOIN incomeSubtypes s ON e.income_id = s.income_id
+            """)
+            rows = cursor.fetchall()
 
-    function closeHistoryModal() {
-        document.getElementById('history-modal-overlay').classList.add('hidden');
-        document.getElementById('history-modal-overlay').classList.remove('flex');
-    }
+            income_types = {}
+            income_subtypes = []
 
-    async function loadPaymentHistory() {
-        const loadingDiv = document.getElementById('history-loading');
-        const contentDiv = document.getElementById('history-content-area');
-        loadingDiv.classList.remove('hidden');
-        contentDiv.innerHTML = '';
+            for income_id, income_title, subtype_title in rows:
+                if income_title not in income_types:
+                    income_types[income_title] = income_id
+                if subtype_title:
+                    income_subtypes.append({
+                        'subtype_title': subtype_title,
+                        'income_id': income_id
+                    })
 
-        try {
-            const response = await fetch('/api/get_payments');
-            const result = await response.json();
-
-            if (result.ok) {
-                loadingDiv.classList.add('hidden');
-                if (result.history.length === 0) {
-                    contentDiv.innerHTML = '<p class="text-gray-500 text-center py-4">No payment history found.</p>';
-                    return;
-                }
-
-                let historyHtml = `
-                    <table class="min-w-full divide-y divide-gray-200">
-                        <thead>
-                            <tr class="bg-gray-50 text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                <th class="px-3 py-3 text-left">Date</th>
-                                <th class="px-3 py-3 text-left">Vendor</th>
-                                <th class="px-3 py-3 text-right">Amount</th>
-                            </tr>
-                        </thead>
-                        <tbody class="bg-white divide-y divide-gray-200">
-                `;
-
-                result.history.forEach(p => {
-                    historyHtml += `
-                        <tr class="hover:bg-gray-50">
-                            <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-500">${p.date}</td>
-                            <td class="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">${p.vendor}</td>
-                            <td class="px-3 py-2 whitespace-nowrap text-sm text-right font-semibold text-green-700">${p.amount_fmt}</td>
-                        </tr>
-                    `;
-                });
-
-                historyHtml += `
-                        </tbody>
-                    </table>
-                `;
-                contentDiv.innerHTML = historyHtml;
-
-            } else {
-                loadingDiv.textContent = 'Error loading history: ' + (result.error || 'Unknown error.');
-                loadingDiv.classList.remove('hidden');
-                loadingDiv.classList.add('text-red-600');
+            # Convert the dictionary to the format needed
+            response_data = {
+                'types': [{'income_id': v, 'income_title': k} for k, v in income_types.items()],
+                'subtypes': income_subtypes
             }
-        } catch (error) {
-            loadingDiv.textContent = 'An unexpected error occurred while fetching history.';
-            loadingDiv.classList.remove('hidden');
-            loadingDiv.classList.add('text-red-600');
-            console.error('History load error:', error);
-        }
-    }
 
-    // Set today's date for filter input if 'created_before' is empty (to default to filtering up to today)
-    window.onload = function() {
-        const toInput = document.getElementById('to');
-        if (!toInput.value) {
-            toInput.value = new Date().toISOString().split('T')[0];
-        }
-    }
+            return jsonify(response_data)
+        else:
+            return "Error: No database connection"
 
-</script>
-</body>
-</html>
+    except Exception as e:
+        print(f"Error in income_data route: {str(e)}")
+        return "Error in income_data route"
+
+    finally:
+        if connection:
+            connection.close()
+
+
+@app.route('/add_income', methods=['POST'])
+def add_income():
+    connection = check_database_connection()
+
+    if connection:
+        try:
+            cursor = connection.cursor()
+
+            amount = float(request.form['amount'])
+            income_title = request.form['income_type']
+            payment_to = request.form['income_subtype']
+            description = request.form.get('description', '')
+            submission_datetime = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+            income_expense_name = f"{income_title} - {payment_to}"
+
+            # Get current bank balance from last record
+            cursor.execute("""
+                            SELECT accounts_balance
+                            FROM accounts
+                            WHERE accounts_name = 'Bank'
+                        """)
+            last_bank_balance = cursor.fetchone()
+            current_bank_balance = last_bank_balance[0] if last_bank_balance else 0.00
+
+            new_bank_balance = current_bank_balance + amount
+
+            # Optional: get current account balance (if needed for 'Account_Balance')
+            cursor.execute("""
+                SELECT accounts_balance
+                FROM accounts
+                WHERE accounts_name = %s
+            """, (payment_to,))
+            account_balance_result = cursor.fetchone()
+            current_account_balance = account_balance_result[0] if account_balance_result else 0.00
+            new_account_balance = current_account_balance + amount
+
+            # Insert with Bank_Balance and Account_Balance
+            cursor.execute("""
+                INSERT INTO IncomeExpenseTable
+                    (Income_Expense_Name, Description, Amount, Type, Payment_Date, Bank_Balance, Account_Balance)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (
+                income_expense_name,
+                description,
+                amount,
+                'Income',
+                submission_datetime,
+                new_bank_balance,
+                new_account_balance
+            ))
+
+            # Update individual account balance if it's an investment
+            if income_title == 'Investments':
+                cursor.execute("""
+                    UPDATE accounts
+                    SET accounts_balance = accounts_balance + %s
+                    WHERE accounts_name = %s
+                """, (amount, payment_to))
+
+            # Always update Bank account balance
+            cursor.execute("""
+                UPDATE accounts
+                SET accounts_balance = accounts_balance + %s
+                WHERE accounts_name = 'Bank'
+            """, (amount,))
+
+            connection.commit()
+            return jsonify({'status': 'success', 'message': 'Income successfully added!'})
+
+        except Exception as e:
+            connection.rollback()
+            print(f"Error in add_income route: {str(e)}")
+            return jsonify({'status': 'error', 'message': 'Error in adding income'})
+
+        finally:
+            connection.close()
+    else:
+        return jsonify({'status': 'error', 'message': 'Error: No database connection'})
+
+
+
+
+@app.route('/add_expense', methods=['POST'])
+def add_expense():
+    connection = check_database_connection()
+
+    if connection:
+        try:
+            cursor = connection.cursor()
+
+            amount = float(request.form['amount'])  # Convert to float for numeric operations
+            expense_title = request.form['expense_type']
+            payment_to = request.form['expense_subtype']
+            description = request.form.get('description', '')
+            submission_datetime = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+            income_expense_name = f"{expense_title} - {payment_to}"
+
+            # Get current Bank balance from accounts table
+            cursor.execute("""
+                SELECT accounts_balance
+                FROM accounts
+                WHERE accounts_name = 'Bank'
+            """)
+            bank_balance_result = cursor.fetchone()
+            current_bank_balance = bank_balance_result[0] if bank_balance_result else 0.00
+            new_bank_balance = current_bank_balance - amount
+
+            # Determine if we should subtract from the individual account
+            update_account_balance = expense_title in ['Profit Withdrawal', 'Employee Salary', 'Employee Loan']
+
+            if update_account_balance:
+                # Get current account balance
+                cursor.execute("""
+                    SELECT accounts_balance
+                    FROM accounts
+                    WHERE accounts_name = %s
+                """, (payment_to,))
+                account_balance_result = cursor.fetchone()
+                current_account_balance = account_balance_result[0] if account_balance_result else 0.00
+                new_account_balance = current_account_balance + amount
+
+                # Update the account balance
+                cursor.execute("""
+                    UPDATE accounts
+                    SET accounts_balance = accounts_balance + %s
+                    WHERE accounts_name = %s
+                """, (amount, payment_to))
+            else:
+                new_account_balance = None  # not updated/tracked for this expense type
+
+            # Always update Bank account balance
+            cursor.execute("""
+                UPDATE accounts
+                SET accounts_balance = accounts_balance - %s
+                WHERE accounts_name = 'Bank'
+            """, (amount,))
+
+            # Insert into IncomeExpenseTable with balance fields
+            cursor.execute("""
+                INSERT INTO IncomeExpenseTable 
+                    (Income_Expense_Name, Description, Amount, Type, Payment_Date, Bank_Balance, Account_Balance)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (
+                income_expense_name,
+                description,
+                amount,
+                'Expense',
+                submission_datetime,
+                new_bank_balance,
+                new_account_balance
+            ))
+
+            connection.commit()
+            return jsonify({'status': 'success', 'message': 'Expense successfully added!'})
+
+        except Exception as e:
+            connection.rollback()
+            print(f"Error in add_expense route: {str(e)}")
+            return jsonify({'status': 'error', 'message': 'Error in adding expense'})
+
+        finally:
+            connection.close()
+    else:
+        return jsonify({'status': 'error', 'message': 'Error: No database connection'})
+
+
+
+
+@app.route('/get_payables')
+def get_payables():
+    connection = check_database_connection()
+
+    if connection:
+        try:
+            cursor = connection.cursor()
+
+            # Fetching data from payables table
+            cursor.execute("""SELECT vendor, amount, pendingsince FROM payables""")
+            rows = cursor.fetchall()  # Correctly fetch the rows from the cursor
+
+            payables_list = []
+            total_payables = 0  # Initialize total payables
+
+            for payable in rows:
+                vendor, amount, pending_since = payable
+                pending_days = (datetime.now().date() - pending_since).days
+
+                # Calculate total payables
+                total_payables += amount
+
+                # Prepare payables data to return
+                payables_list.append({
+                    'vendor': vendor,
+                    'amount': f"Rs {amount}",
+                    'pending_since': pending_since.strftime('%d %b %Y'),
+                    'pending_days': pending_days
+                })
+            print(total_payables)
+
+            # Return both the payables list and the total payables
+            return jsonify({
+                'payables': payables_list,
+                'total_payables': f"Rs {total_payables}"
+            })
+
+        except Exception as e:
+            connection.rollback()
+            print(f"Error in get_payables route: {str(e)}")
+            return jsonify({'status': 'error', 'message': 'Error in fetching payables'})
+
+        finally:
+            connection.close()
+    else:
+        return jsonify({'status': 'error', 'message': 'Error: No database connection'})
+
+
+
+@app.route('/mark_paid', methods=['POST'])
+def mark_paid():
+    vendor = request.args.get('vendor')
+
+    if not vendor:
+        return jsonify({'status': 'error', 'message': 'Vendor parameter is missing'})
+    print(vendor)
+    connection = check_database_connection()
+    if connection:
+        try:
+            cursor = connection.cursor()
+
+            # Use named parameters for SQL Server
+            cursor.execute("DELETE FROM payables WHERE vendor = %s", (vendor))
+
+            connection.commit()
+            return jsonify({'status': 'success', 'message': 'Payable marked as paid'})
+
+        except Exception as e:
+            connection.rollback()
+            print(f"Error in mark_paid route: {str(e)}")
+            return jsonify({'status': 'error', 'message': 'Error in marking payable as paid'})
+
+        finally:
+            connection.close()
+    else:
+        return jsonify({'status': 'error', 'message': 'Error: No database connection'})
+
+
+@app.route('/update_amount', methods=['POST'])
+def update_amount():
+    try:
+        data = request.get_json()
+        vendor = data.get('vendor')
+        new_amount = data.get('amount')
+        print(f"{vendor} : {new_amount}")
+
+        if not vendor or not new_amount:
+            return jsonify({'status': 'error', 'message': 'Vendor or amount is missing'})
+
+        connection = check_database_connection()
+        if connection:
+            try:
+                cursor = connection.cursor()
+
+                # Use parameterized queries to prevent SQL injection
+                cursor.execute("UPDATE payables SET amount = %s WHERE vendor = %s", (new_amount, vendor))
+
+                connection.commit()
+                return jsonify({'status': 'success', 'message': 'Amount updated successfully'})
+
+            except Exception as e:
+                connection.rollback()
+                print(f"Error in update_amount route: {str(e)}")
+                return jsonify({'status': 'error', 'message': 'Error updating amount'})
+
+            finally:
+                connection.close()
+        else:
+            return jsonify({'status': 'error', 'message': 'Error: No database connection'})
+
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'Error: {str(e)}'})
+
+
+@app.route('/add_payable', methods=['POST'])
+def add_payable():
+    try:
+        data = request.get_json()
+        vendor = data.get('vendor')
+        amount = data.get('amount')
+        pending_since = data.get('pending_since')
+
+        if not vendor or not amount or not pending_since:
+            return jsonify({'status': 'error', 'message': 'All fields are required'})
+
+        connection = check_database_connection()
+        if connection:
+            try:
+                cursor = connection.cursor()
+
+                # Insert new payable into the database
+                cursor.execute("""
+                    INSERT INTO payables (vendor, amount, pendingsince)
+                    VALUES (%s, %s, %s)
+                """, (vendor, amount, pending_since))
+
+                connection.commit()
+                return jsonify({'status': 'success', 'message': 'Payable added successfully'})
+
+            except Exception as e:
+                connection.rollback()
+                print(f"Error in add_payable route: {str(e)}")
+                return jsonify({'status': 'error', 'message': 'Error adding payable'})
+
+            finally:
+                connection.close()
+        else:
+            return jsonify({'status': 'error', 'message': 'Error: No database connection'})
+
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'Error: {str(e)}'})
+
+
+if __name__ == "__main__":
+    app.run(port=5001)
