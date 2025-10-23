@@ -1,499 +1,526 @@
-import os, json
-from datetime import datetime, timedelta, date
-from decimal import Decimal, ROUND_HALF_UP
-from flask import Flask, render_template, request, jsonify
-from lazop import LazopClient, LazopRequest  # Lazop, matching your sample
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Daraz TQM Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f7f9fb; }
+        .card { transition: all 0.3s ease; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.06); }
+        .card:hover { box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1); transform: translateY(-2px); }
+        .row { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px dashed #e5e7eb; }
+        .row:last-child { border-bottom: none; }
+        .modal-overlay { background-color: rgba(0, 0, 0, 0.5); z-index: 50; }
+        .modal-content { max-height: 80vh; max-width: 90vw; }
+        .data-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem; }
+        .data-grid > div { background: white; padding: 1rem; border-radius: 0.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    </style>
+</head>
+<body class="p-4 sm:p-8">
 
-# ---- CONFIG ----
-ENDPOINT     = os.getenv("DARAZ_ENDPOINT", "https://api.daraz.pk/rest")
-APP_KEY      = os.getenv("DARAZ_APP_KEY")
-APP_SECRET   = os.getenv("DARAZ_APP_SECRET")
-ACCESS_TOKEN = os.getenv("DARAZ_ACCESS_TOKEN")
+    <!-- Header and Controls -->
+    <header class="mb-8">
+        <h1 class="text-3xl font-bold text-gray-800">Daraz TQM Dashboard / Vendor Payment Tracker</h1>
+        <form id="filter-form" class="flex flex-col sm:flex-row items-end gap-3 mt-4 bg-white p-4 rounded-lg shadow-sm">
+            <div class="flex flex-col flex-grow w-full sm:w-auto">
+                <label for="from" class="text-sm font-medium text-gray-600">Order Date From:</label>
+                <input type="date" id="from" name="from" value="{{ created_after }}"
+                       class="mt-1 p-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500">
+            </div>
+            <div class="flex flex-col flex-grow w-full sm:w-auto">
+                <label for="to" class="text-sm font-medium text-gray-600">Order Date To (Optional):</label>
+                <input type="date" id="to" name="to" value="{{ created_before }}"
+                       class="mt-1 p-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500">
+            </div>
+            <button type="submit"
+                    class="w-full sm:w-auto px-4 py-2 bg-indigo-600 text-white font-semibold rounded-md shadow-md hover:bg-indigo-700 transition duration-150">
+                Apply Filter
+            </button>
+        </form>
+    </header>
 
-# Hardcoded initial fetch date: 6 July 2025 (+05:00)
-CREATED_AFTER_ISO = "2025-07-06T00:00:00+05:00"
-CREATED_AFTER_DISPLAY = "2025-07-06"
+    <!-- Stat Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
 
-# All statuses EXCEPT "canceled"
-STATUSES_EXCEPT_CANCELED = [
-    "unpaid", "pending", "ready_to_ship", "shipped", "delivered",
-    "returned", "failed", "topack", "toship", "packed", "shipped_back_success"
-]
+        <!-- Net Payables (Liability Card) -->
+        <div class="card p-5 bg-white rounded-xl border border-gray-200">
+            <h3 class="text-lg font-semibold text-gray-700 mb-2">Net Vendor Payables</h3>
+            <p class="text-2xl font-bold {{ 'text-red-600' if stats.net_payables_raw is defined and stats.net_payables_raw > 0 else 'text-green-600' }}">
+                {{ stats.net_payables }}
+            </p>
+            <p class="text-sm text-gray-500 mt-2">Total Liability - Payments Made
+            </p>
+            <button onclick="openPaymentModal()"
+                    class="mt-3 text-indigo-600 hover:text-indigo-800 text-sm font-medium">
+                Record New Payment
+            </button>
+        </div>
 
-# Local storage files
-COSTS_FILE = "product_costs.json"   # { key: { "product_cost": "123.45", "packaging": "50.00", "vendor": "Tick Bags|Sleek Space|Other" }, ... }
-PAID_FILE  = "vendor_paid.json"     # { order_id: true/false }
+        <!-- Total Vendor Cost (Liability Breakdown) -->
+        <div class="card p-5 bg-white rounded-xl border border-gray-200">
+            <h3 class="text-lg font-semibold text-gray-700 mb-2">Total Vendor Cost Liability</h3>
+            <div class="card-content">
+                <div class="row text-lg font-bold"><span>Total Cost</span><span class="text-gray-900">{{ stats.vendor_cost_total }}</span></div>
+                <div class="row text-sm text-gray-500 mt-1"><span>- Tick Bags Liability</span><span>{{ stats.payables_tick }}</span></div>
+                <div class="row text-sm text-gray-500"><span>- Sleek Space Liability</span><span>{{ stats.payables_sleek }}</span></div>
+            </div>
+            <p class="text-sm text-gray-500 mt-2">Total Cost of Goods & Packaging</p>
+        </div>
 
-VENDOR_CHOICES = ["Tick Bags", "Sleek Space", "Other"]
+        <!-- Total Payments Made -->
+        <div class="card p-5 bg-white rounded-xl border border-gray-200">
+            <h3 class="text-lg font-semibold text-gray-700 mb-2">Total Payments Recorded</h3>
+            <p class="text-2xl font-bold text-green-600">
+                {{ stats.total_paid }}
+            </p>
+            <p class="text-sm text-gray-500 mt-2">Historic Payments to Vendors</p>
+            <button onclick="openHistoryModal()"
+                    class="mt-3 text-indigo-600 hover:text-indigo-800 text-sm font-medium">
+                View Payment History
+            </button>
+        </div>
 
-app = Flask(__name__)
-@app.template_filter('first_words')
-def first_words(s, n=3):
-    """Return the first n words of s, adding … if truncated."""
-    if not s:
-        return ""
-    parts = str(s).split()
-    n = int(n)
-    trimmed = " ".join(parts[:n])
-    return trimmed + ("…" if len(parts) > n else "")
+        <!-- Net Profit Collected -->
+        <div class="card p-5 bg-white rounded-xl border border-gray-200">
+            <h3 class="text-lg font-semibold text-gray-700 mb-2">Net Profit Collected</h3>
+            <p class="text-2xl font-bold text-blue-600">
+                {{ stats.net_profit_collected }}
+            </p>
+            <p class="text-sm text-gray-500 mt-2">Profit from Paid/Settled Orders (After Daraz Fees)</p>
+        </div>
+
+    </div>
+
+    <!-- Order List -->
+    <div class="bg-white rounded-xl shadow-lg p-6">
+        <h2 class="text-2xl font-semibold text-gray-800 mb-4">{{ orders | length }} Orders Found</h2>
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead>
+                    <tr class="bg-gray-50 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        <th class="px-3 py-3 text-left">Order ID / Date</th>
+                        <th class="px-3 py-3 text-left">Customer / Address</th>
+                        <th class="px-3 py-3 text-right">Invoice Status</th>
+                        <th class="px-3 py-3 text-right">Net Received</th>
+                        <th class="px-3 py-3 text-right">Vendor Cost</th>
+                        <th class="px-3 py-3 text-right">Net Profit</th>
+                        <th class="px-3 py-3 text-center">Items</th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                    {% for order in orders %}
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-3 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                            {{ order.order_id }}<br>
+                            <span class="text-xs text-gray-500">{{ order.order_date }}</span>
+                        </td>
+                        <td class="px-3 py-4 whitespace-nowrap text-sm text-gray-500">
+                            <strong>{{ order.customer.name }}</strong><br>
+                            <span class="text-xs">{{ order.customer.address | first_words(6) }}</span>
+                        </td>
+                        <td class="px-3 py-4 whitespace-nowrap text-right">
+                            <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full
+                                {% if 'Paid' in order.paid_status %} bg-green-100 text-green-800
+                                {% elif 'Not Paid' in order.paid_status %} bg-yellow-100 text-yellow-800
+                                {% else %} bg-red-100 text-red-800
+                                {% endif %}"
+                            >
+                                {{ order.paid_status }}
+                            </span>
+                            <br>
+                            <span class="text-xs text-gray-500">{{ order.statement | first_words(4) }}</span>
+                        </td>
+                        <td class="px-3 py-4 whitespace-nowrap text-sm text-right text-gray-900 font-medium">
+                            {{ order.invoice_amount }}
+                        </td>
+                        <td class="px-3 py-4 whitespace-nowrap text-sm text-right text-red-600 font-medium">
+                            {{ order.product_cost_total }}<br>
+                            <span class="text-xs text-gray-500">+ {{ order.packaging_total }} (Pkg)</span>
+                        </td>
+                        <td class="px-3 py-4 whitespace-nowrap text-sm text-right font-bold
+                            {% if order.net_profit_num | float < 0 %} text-red-700 {% else %} text-green-700 {% endif %}">
+                            {{ order.net_profit }}
+                        </td>
+                        <td class="px-3 py-4 whitespace-nowrap text-center text-sm">
+                            <button onclick="openDetailModal({{ order.order_id }})"
+                                class="text-indigo-600 hover:text-indigo-900 text-sm font-medium">
+                                {{ order.items_list | length }} Item(s)
+                            </button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% if not orders %}
+        <p class="text-center text-gray-500 py-10">No orders found matching your criteria.</p>
+        {% endif %}
+    </div>
 
 
-client = LazopClient(ENDPOINT, APP_KEY, APP_SECRET)
+    <!-- Modals (Hidden by default) -->
+    <div id="detail-modal-overlay" class="modal-overlay fixed inset-0 hidden items-center justify-center">
+        <div id="detail-modal" class="bg-white rounded-xl shadow-2xl p-6 w-11/12 md:w-4/5 lg:w-3/5 modal-content overflow-y-auto transform scale-95 transition-transform">
+            <div class="flex justify-between items-start mb-4 border-b pb-2">
+                <h3 class="text-xl font-bold text-gray-800">Order Details: <span id="modal-order-id" class="text-indigo-600"></span></h3>
+                <button onclick="closeDetailModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+            </div>
+            <div id="modal-content-area" class="space-y-6">
+                <!-- Content will be injected here -->
+            </div>
+        </div>
+    </div>
 
-# ---------- helpers ----------
-def _d(x) -> Decimal:
-    try:
-        s = str(x).replace(",", "").strip()
-        return Decimal(s if s else "0")
-    except Exception:
-        return Decimal("0")
+    <!-- Record Payment Modal -->
+    <div id="payment-modal-overlay" class="modal-overlay fixed inset-0 hidden items-center justify-center">
+        <div class="bg-white rounded-xl shadow-2xl p-6 w-11/12 md:w-1/3 modal-content overflow-y-auto transform scale-95 transition-transform">
+            <div class="flex justify-between items-start mb-4 border-b pb-2">
+                <h3 class="text-xl font-bold text-gray-800">Record Vendor Payment</h3>
+                <button onclick="closePaymentModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+            </div>
+            <form id="record-payment-form" class="space-y-4">
+                <div>
+                    <label for="payment-vendor" class="block text-sm font-medium text-gray-700">Vendor</label>
+                    <select id="payment-vendor" name="vendor" required
+                            class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
+                        {% for vendor in vendors %}
+                        <option value="{{ vendor }}">{{ vendor }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label for="payment-amount" class="block text-sm font-medium text-gray-700">Amount (PKR)</label>
+                    <input type="number" id="payment-amount" name="amount" step="0.01" min="0.01" required
+                           class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2">
+                </div>
+                <div>
+                    <label for="payment-date" class="block text-sm font-medium text-gray-700">Payment Date</label>
+                    <!-- The value attribute was removed and is now set by JavaScript -->
+                    <input type="date" id="payment-date" name="date" required
+                           class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2">
+                </div>
+                <button type="submit" id="payment-submit-btn"
+                        class="w-full px-4 py-2 border border-transparent rounded-md shadow-sm text-base font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                    Record Payment
+                </button>
+                <div id="payment-message" class="text-center mt-3 hidden"></div>
+            </form>
+        </div>
+    </div>
 
-def _fmt_pkr(x) -> str:
-    try:
-        d = _d(x).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-    except Exception:
-        d = Decimal("0.00")
-    return f"PKR {d:,.2f}"
+    <!-- Payment History Modal -->
+    <div id="history-modal-overlay" class="modal-overlay fixed inset-0 hidden items-center justify-center">
+        <div class="bg-white rounded-xl shadow-2xl p-6 w-11/12 md:w-2/3 lg:w-2/5 modal-content overflow-y-auto transform scale-95 transition-transform">
+            <div class="flex justify-between items-start mb-4 border-b pb-2">
+                <h3 class="text-xl font-bold text-gray-800">Vendor Payment History</h3>
+                <button onclick="closeHistoryModal()" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+            </div>
+            <div id="history-content-area" class="space-y-3">
+                <!-- History will be injected here -->
+                <p class="text-gray-500 text-center py-4" id="history-loading">Loading payment history...</p>
+            </div>
+            <div id="history-message" class="text-center mt-3 hidden"></div>
+        </div>
+    </div>
 
-def _parse_order_date_str(s: str | None) -> str:
-    if not s:
-        return ""
-    if "T" in s: return s.split("T", 1)[0]
-    if " " in s: return s.split(" ", 1)[0]
-    return s[:10]
 
-def _join_address(addr: dict | None) -> str:
-    if not addr: return ""
-    parts = [addr.get("address1"), addr.get("address2"), addr.get("address3"),
-             addr.get("address4"), addr.get("address5"), addr.get("city")]
-    parts = [p for p in parts if p and str(p).lower() != "null"]
-    line = ", ".join(parts)
-    post = addr.get("post_code") or ""
-    country = addr.get("country") or ""
-    if post:    line = f"{line}, {post}" if line else post
-    if country: line = f"{line}, {country}" if line else country
-    return line
+<script type="text/javascript">
+    // Helper function to find order data by ID
+    const ORDERS_DATA = JSON.parse('{{ orders | tojson }}');
 
-def format_title(name, variation):
-    base = f"{name or 'Unknown'} {variation or ''}".strip()
-    if "Color family:" in base:
-        p, c = base.split("Color family:", 1)
-        return f"{p.strip()} - {c.strip()}"
-    return base
+    function getOrderData(orderId) {
+        return ORDERS_DATA.find(o => String(o.order_id) === String(orderId));
+    }
 
-def _load_json(path: str) -> dict:
-    if not os.path.exists(path):
-        return {}
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
+    function _d(x) {
+        try {
+            return parseFloat(String(x).replace(/[^0-9.-]/g, '')) || 0;
+        } catch {
+            return 0;
+        }
+    }
 
-def _save_json(path: str, data: dict):
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, path)
+    // --- Detail Modal Functions ---
 
-def _item_key(it: dict) -> str:
-    """
-    Stable identifier for a product across orders.
-    Prefer seller_sku, then lazada_sku, then sku, then name|variation.
-    """
-    for k in ("seller_sku", "lazada_sku", "sku"):
-        v = (it.get(k) or "").strip()
-        if v: return v
-    return f"{(it.get('name') or '').strip()}|{(it.get('variation') or '').strip()}"
+    function renderDetailContent(order) {
+        let content = `
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                <div>
+                    <p class="font-semibold text-gray-700">Customer Info:</p>
+                    <p>${order.customer.name}</p>
+                    <p class="text-xs text-gray-500">${order.customer.address}</p>
+                    <p class="text-xs text-gray-500">${order.customer.phone}</p>
+                </div>
+                <div>
+                    <p class="font-semibold text-gray-700">Financial Summary:</p>
+                    <div class="row text-xs"><span>Order Price:</span><span>${order.price}</span></div>
+                    <div class="row text-xs"><span>Net Received:</span><span class="font-bold">${order.invoice_amount}</span></div>
+                    <div class="row text-xs"><span>Total Product Cost:</span><span class="text-red-600">${order.product_cost_total}</span></div>
+                    <div class="row text-xs"><span>Total Packaging Cost:</span><span class="text-red-600">${order.packaging_total}</span></div>
+                    <div class="row text-xs font-bold mt-1"><span>Net Profit:</span><span class="${_d(order.net_profit_num) < 0 ? 'text-red-700' : 'text-green-700'}">${order.net_profit}</span></div>
+                    <p class="text-xs text-gray-500 mt-2 italic">Statement: ${order.statement || 'N/A'}</p>
+                </div>
+            </div>
 
-# ---------- API calls ----------
-def _orders_list(created_after_iso: str, statuses=None):
-    lim = "50"
-    offsets = ["0"]
-    status_list = statuses or [None]
-    seen = {}
+            <h4 class="text-lg font-semibold text-gray-700 mt-4 mb-2">Invoice Breakdown (Net Received = Sum of below)</h4>
+            <div class="data-grid text-xs">
+                ${order.invoice_breakdown.map(item => `
+                    <div class="row text-xs"><span>${item.label}:</span><span class="${_d(item.amount_fmt) < 0 ? 'text-red-600' : 'text-green-600'}">${item.amount_fmt}</span></div>
+                `).join('')}
+            </div>
 
-    for status in status_list:
-        for offset in offsets:
-            req = LazopRequest('/orders/get', 'GET')
-            req.add_api_param('access_token', ACCESS_TOKEN)
-            req.add_api_param('sort_direction', 'DESC')
-            req.add_api_param('offset', offset)
-            req.add_api_param('created_after', created_after_iso)
-            req.add_api_param('limit', lim)               # keep your sample's 'limit'
-            req.add_api_param('update_after', created_after_iso)
-            req.add_api_param('sort_by', 'updated_at')
-            if status:
-                req.add_api_param('status', status)
+            <h4 class="text-lg font-semibold text-gray-700 mt-6 mb-2">Order Items (Status & Costs)</h4>
+            <div class="space-y-4">
+            ${order.items_list.map(item => `
+                <div class="data-grid border p-3 rounded-lg bg-gray-50">
+                    <div class="sm:col-span-2">
+                        <p class="font-bold text-sm">${item.item_title}</p>
+                        <p class="text-xs text-gray-500">SKU: ${item.key}</p>
+                        ${item.is_returned ? '<span class="text-xs font-semibold text-red-600">ITEM RETURNED / FAILED</span>' : ''}
+                    </div>
+                    <div>
+                        <p class="text-xs font-medium text-gray-700">Qty / Status</p>
+                        <p class="text-sm">${item.quantity} / <span class="font-semibold text-indigo-600">${item.status}</span></p>
+                    </div>
+                    <div class="col-span-1 sm:col-span-2">
+                        <p class="text-xs font-medium text-gray-700">Costs & Vendor</p>
+                        <div class="flex justify-between text-xs">
+                            <span>Product Cost:</span>
+                            <span class="${item.is_returned ? 'line-through text-gray-400' : 'text-red-600'}">PKR ${item.product_cost}</span>
+                        </div>
+                        <div class="flex justify-between text-xs">
+                            <span>Packaging Cost:</span>
+                            <span class="text-red-600">PKR ${item.packaging}</span>
+                        </div>
+                        <div class="flex justify-between text-xs mt-1">
+                            <span>Vendor:</span>
+                            <span class="font-semibold text-gray-700">${item.vendor || 'Other'}</span>
+                        </div>
+                        ${item.needs_cost ? `
+                        <div class="mt-2 p-2 bg-yellow-100 text-yellow-800 rounded-md text-xs">
+                            ⚠️ Cost is missing. Please update.
+                        </div>
+                        <form onsubmit="saveItemCost(event, '${item.key}')" class="mt-2 space-y-1 text-xs">
+                            <input type="hidden" name="key" value="${item.key}">
+                            <input type="number" name="product_cost" placeholder="Product Cost" step="0.01" value="${item.product_cost}" class="w-full p-1 border rounded-md">
+                            <input type="number" name="packaging" placeholder="Packaging Cost" step="0.01" value="${item.packaging}" class="w-full p-1 border rounded-md">
+                            <select name="vendor" class="w-full p-1 border rounded-md">
+                                {% for vendor in vendors %}
+                                <option value="{{ vendor }}" ${item.vendor === '{{ vendor }}' ? 'selected' : ''}>{{ vendor }}</option>
+                                {% endfor %}
+                            </select>
+                            <button type="submit" class="w-full bg-indigo-500 text-white py-1 rounded-md hover:bg-indigo-600">Save Cost</button>
+                        </form>
+                        ` : ''}
+                    </div>
+                </div>
+            `).join('')}
+            </div>
+        `;
+        document.getElementById('modal-content-area').innerHTML = content;
+    }
 
-            resp = client.execute(req)
-            orders = (getattr(resp, "body", {}) or {}).get('data', {}).get('orders', []) or []
+    function openDetailModal(orderId) {
+        const order = getOrderData(orderId);
+        if (!order) {
+            console.error('Order not found:', orderId);
+            return;
+        }
 
-            for o in orders:
-                oid = str(o.get('order_id'))
-                if oid in seen: continue
-                name = f"{o.get('customer_first_name','') or ''} {o.get('customer_last_name','') or ''}".strip()
-                addr_ship = o.get('address_shipping') or {}
-                if not name:
-                    name = f"{addr_ship.get('first_name','') or ''} {addr_ship.get('last_name','') or ''}".strip()
-                address = _join_address(addr_ship)
-                phone = addr_ship.get('phone') or addr_ship.get('phone2') or ""
-                seen[oid] = {
-                    'order_id': oid,
-                    'created_at_raw': o.get('created_at', ''),
-                    'order_date': _parse_order_date_str(o.get('created_at', '')),
-                    'price': o.get('price', '0.00'),
-                    'customer': {'name': name or "", 'address': address or "", 'phone': phone or ""},
-                    'statuses': o.get('statuses') or []
+        document.getElementById('modal-order-id').textContent = orderId;
+        renderDetailContent(order);
+        document.getElementById('detail-modal-overlay').classList.remove('hidden');
+        document.getElementById('detail-modal-overlay').classList.add('flex');
+    }
+
+    function closeDetailModal() {
+        document.getElementById('detail-modal-overlay').classList.add('hidden');
+        document.getElementById('detail-modal-overlay').classList.remove('flex');
+    }
+
+    async function saveItemCost(event, itemKey) {
+        event.preventDefault();
+        const form = event.target;
+        const key = form.elements['key'].value;
+        const product_cost = form.elements['product_cost'].value;
+        const packaging = form.elements['packaging'].value;
+        const vendor = form.elements['vendor'].value;
+
+        try {
+            const response = await fetch('/api/save_cost', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key, product_cost, packaging, vendor })
+            });
+
+            const result = await response.json();
+            if (result.ok) {
+                // Simplified success: just show a message and disable the form
+                const saveButton = form.querySelector('button[type="submit"]');
+                if (saveButton) {
+                    saveButton.textContent = 'Saved!';
+                    saveButton.classList.remove('bg-indigo-500', 'hover:bg-indigo-600');
+                    saveButton.classList.add('bg-green-500');
+                    saveButton.disabled = true;
                 }
-    return list(seen.values())
-
-def _items_with_tracking(order_id: str, order_statuses=None):
-    # Items
-    it_req = LazopRequest('/order/items/get', 'GET')
-    it_req.add_api_param('access_token', ACCESS_TOKEN)
-    it_req.add_api_param('order_id', order_id)
-    it_res = client.execute(it_req)
-    items = (getattr(it_res, "body", {}) or {}).get('data', []) or []
-
-    # Tracking
-    tr_req = LazopRequest('/logistic/order/trace', 'GET')
-    tr_req.add_api_param('access_token', ACCESS_TOKEN)
-    tr_req.add_api_param('order_id', order_id)
-    tr_res = client.execute(tr_req)
-    tr_body = getattr(tr_res, "body", {}) or {}
-    tr_result = tr_body.get('result', {}) or {}
-    tr_data = tr_result.get('data', []) or []
-    tmap = {}
-    if tr_data:
-        pkg_list = tr_data[0].get('package_detail_info_list', []) or []
-        for pkg in pkg_list:
-            tnum = pkg.get('tracking_number')
-            det = pkg.get('logistic_detail_info_list', []) or []
-            last = det[-1].get('title') if det else None
-            if tnum: tmap[tnum] = last or None
-
-    order_status_text = None
-    if order_statuses:
-        for s in reversed(order_statuses):
-            if s:
-                order_status_text = s.replace('_', ' ').title()
-                break
-
-    rows = []
-    for it in items:
-        tnum = it.get('tracking_code') or 'N/A'
-        status_from_trace = tmap.get(tnum)
-        if status_from_trace:
-            final_status = status_from_trace
-        elif tnum in ("", None, "N/A"):
-            final_status = "Un-Booked"
-        else:
-            item_status = (it.get('status') or it.get('order_item_status') or "").strip()
-            final_status = item_status.replace('_', ' ').title() if item_status else (order_status_text or "N/A")
-
-        rows.append({
-            'key': _item_key(it),
-            'item_image': it.get('product_main_image', ''),
-            'item_title': format_title(it.get('name'), it.get('variation')),
-            'quantity': it.get('quantity', 1),
-            'tracking_number': tnum,
-            'status': final_status
-        })
-    return rows
-
-# ---- Invoicing (restored logic you liked) ----
-def _finance_for_order(order_id: str, order_date_str: str, order_total_str: str):
-    """
-    Returns:
-      net_total_num (Decimal), net_total_fmt (str), statement_text (str),
-      paid_status_label (str), breakdown (list of {label, amount_fmt})
-    Ensures "Product Price Paid by Buyer" == order total if the API doesn't provide it.
-    """
-    try:
-        od = datetime.strptime(order_date_str or CREATED_AFTER_DISPLAY, "%Y-%m-%d").date()
-    except Exception:
-        od = date.today()
-    start_date = (od - timedelta(days=1)).strftime("%Y-%m-%d")
-    end_date   = (od + timedelta(days=120)).strftime("%Y-%m-%d")
-
-    req = LazopRequest('/finance/transaction/details/get', 'GET')
-    req.add_api_param('access_token', ACCESS_TOKEN)
-    req.add_api_param('offset', '0')
-    req.add_api_param('limit', '500')
-    req.add_api_param('start_time', start_date)
-    req.add_api_param('end_time', end_date)
-    req.add_api_param('trade_order_id', order_id)
-
-    res = client.execute(req)
-    rows = (getattr(res, "body", {}) or {}).get("data", []) or []
-
-    agg = {}
-    for r in rows:
-        label = (r.get("fee_name") or r.get("transaction_type") or "Other").strip()
-        amt = _d(r.get("amount"))
-        agg[label] = agg.get(label, Decimal("0")) + amt
-
-    product_key = None
-    for k in list(agg.keys()):
-        if k.strip().lower() == "product price paid by buyer":
-            product_key = k
-            break
-    order_total = _d(order_total_str)
-    if product_key is None:
-        agg["Product Price Paid by Buyer"] = order_total
-    elif agg[product_key] <= 0:
-        agg[product_key] = order_total
-
-    paid_status_label = "Paid" if any(str(r.get("paid_status","")).lower() in ("yes","paid") for r in rows) else "Not Paid"
-    statement_text = rows[-1].get("statement") if rows else ""
-
-    net_total_num = sum(agg.values(), Decimal("0"))
-    net_total_fmt = _fmt_pkr(net_total_num)
-
-    items = list(agg.items())
-    items.sort(key=lambda kv: (
-        kv[0].strip().lower() != "product price paid by buyer",
-        0 if kv[1] >= 0 else 1,
-        kv[0].lower()
-    ))
-    breakdown = [{"label": k, "amount_fmt": _fmt_pkr(v)} for k, v in items]
-    return net_total_num, net_total_fmt, statement_text, paid_status_label, breakdown
-
-# -------- LOAD RAW DATA ON STARTUP (once) --------
-RAW_ORDERS_CACHE = []
-LOAD_ERROR = None
-try:
-    summaries = _orders_list(CREATED_AFTER_ISO, statuses=STATUSES_EXCEPT_CANCELED)
-    RAW_ORDERS_CACHE = []
-    for s in summaries:
-        items_list = _items_with_tracking(s['order_id'], order_statuses=s.get('statuses'))
-        # store only raw order summary + raw items; finance computed on-demand & cached into this dict
-        RAW_ORDERS_CACHE.append({**s, 'items_list': items_list})
-    print(f"[startup] Loaded {len(RAW_ORDERS_CACHE)} unique orders since {CREATED_AFTER_DISPLAY}.")
-except Exception as e:
-    LOAD_ERROR = str(e)
-    print(f"[startup] Error: {LOAD_ERROR}")
-
-def _ensure_finance(base: dict):
-    """Compute finance once per order & cache onto RAW_ORDERS_CACHE entry."""
-    has_all = (
-        base.get("invoice_amount") is not None and
-        base.get("invoice_amount_num") is not None and
-        base.get("statement") is not None and
-        base.get("paid_status") is not None and
-        base.get("invoice_breakdown") is not None
-    )
-    if has_all:
-        return (
-            _d(base.get("invoice_amount_num") or 0),
-            base.get("invoice_amount") or "",
-            base.get("statement") or "",
-            base.get("paid_status") or "",
-            base.get("invoice_breakdown") or [],
-        )
-    net_num, inv_fmt, stmt, paid, br = _finance_for_order(
-        base["order_id"], base.get("order_date"), base.get("price")
-    )
-    base["invoice_amount_num"] = str(net_num)
-    base["invoice_amount"] = inv_fmt
-    base["statement"] = stmt or ""
-    base["paid_status"] = paid or ""
-    base["invoice_breakdown"] = br or []
-    return net_num, inv_fmt, base["statement"], base["paid_status"], base["invoice_breakdown"]
-
-# Build a view from RAW_ORDERS_CACHE and current JSON files
-def _build_runtime_view(filtered_raw):
-    costs = _load_json(COSTS_FILE)
-    paid  = _load_json(PAID_FILE)
-
-    view = []
-    for base in filtered_raw:
-        # finance (ensure cached on RAW_ORDERS_CACHE)
-        net_num, inv_fmt, statement, paid_status, breakdown = _ensure_finance(base)
-
-        # Is whole order returned?
-        order_statuses = [str(s or "").lower() for s in (base.get("statuses") or [])]
-        is_order_returned = any(s == "returned" or "shipped_back_success" in s for s in order_statuses)
-
-        # recompute costs from latest JSON
-        prod_total_eff = Decimal("0")   # effective product cost (0 if returned)
-        pack_total     = Decimal("0")
-        items = []
-
-        for it in base.get("items_list", []):
-            key = it.get("key")
-            rec = costs.get(key) if key else None
-            pc = _d(rec.get("product_cost")) if rec else Decimal("0")
-            pk = _d(rec.get("packaging"))    if rec else Decimal("0")
-            vend = (rec.get("vendor") if rec else "") or "Other"
-            qty = _d(it.get("quantity") or 1)
-
-            # Item is returned if order is returned OR the item's status says returned
-            status_text = (it.get("status") or "").lower()
-            is_item_returned = is_order_returned or ("return" in status_text)
-
-            # Effective product cost is 0 for returned items
-            eff_pc = Decimal("0") if is_item_returned else pc
-
-            prod_total_eff += eff_pc * qty
-            pack_total     += pk * qty
-
-            items.append({
-                **it,
-                "product_cost": str(pc),
-                "packaging": str(pk),
-                "vendor": vend,
-                "needs_cost": (rec is None),
-                "is_returned": is_item_returned,   # expose to UI and stats
-            })
-
-        net_profit_num = net_num - prod_total_eff - pack_total
-
-        view.append({
-            "order_id": base["order_id"],
-            "order_date": base.get("order_date", ""),
-            "price": base.get("price", "0.00"),
-            "customer": base.get("customer", {}),
-            "statement": statement,
-            "paid_status": paid_status,
-            "invoice_amount": inv_fmt,
-            "invoice_amount_num": str(net_num),
-            "invoice_breakdown": breakdown,
-            "items_list": items,
-            "product_cost_total": _fmt_pkr(prod_total_eff),   # effective total (0 for returns)
-            "packaging_total": _fmt_pkr(pack_total),
-            "net_profit": _fmt_pkr(net_profit_num),
-            "net_profit_num": str(net_profit_num),
-            "vendor_paid": bool(paid.get(base["order_id"], False)),
-        })
-    return view
-
-
-def _within_range(od: str, start: str | None, end: str | None) -> bool:
-    """od, start, end are 'YYYY-MM-DD' strings."""
-    if not od:
-        return False
-    try:
-        d = datetime.strptime(od, "%Y-%m-%d").date()
-    except Exception:
-        return False
-    if start:
-        try:
-            s = datetime.strptime(start, "%Y-%m-%d").date()
-            if d < s: return False
-        except: pass
-    if end:
-        try:
-            e = datetime.strptime(end, "%Y-%m-%d").date()
-            if d > e: return False
-        except: pass
-    return True
-
-def _compute_stats(orders_view):
-    """
-    Payables are computed ONLY over unpaid orders (vendor_paid == False).
-    For returned items, only packaging is payable (product cost waived).
-    Net profit collected = sum(net profit) where finance paid_status == 'Paid'.
-    """
-    payables_total = Decimal("0")
-    split = {"Tick Bags": Decimal("0"), "Sleek Space": Decimal("0"), "Other": Decimal("0")}
-    net_profit_collected = Decimal("0")
-
-    for o in orders_view:
-        # vendor split & total payables only for unpaid
-        if not o.get("vendor_paid", False):
-            for it in o.get("items_list", []):
-                qty = _d(it.get("quantity") or 1)
-                pc  = _d(it.get("product_cost"))
-                pk  = _d(it.get("packaging"))
-                vendor = (it.get("vendor") or "Other")
-                # Returned: only pay packaging
-                line = (pk * qty) if it.get("is_returned") else ((pc + pk) * qty)
-                payables_total += line
-                if vendor not in split:
-                    split["Other"] += line
-                else:
-                    split[vendor] += line
-
-        # collected net profit (only if finance marked Paid)
-        if str(o.get("paid_status","")).lower().startswith("paid"):
-            net_profit_collected += _d(o.get("net_profit_num") or 0)
-
-    return {
-        "payables_total": _fmt_pkr(payables_total),
-        "payables_tick": _fmt_pkr(split["Tick Bags"]),
-        "payables_sleek": _fmt_pkr(split["Sleek Space"]),
-        "payables_other": _fmt_pkr(split["Other"]),
-        "net_profit_collected": _fmt_pkr(net_profit_collected),
+                // Optional: Reload the page to refresh all data if needed, but we'll rely on the manual reload for now
+                // window.location.reload();
+            } else {
+                alert('Failed to save cost: ' + result.error);
+            }
+        } catch (error) {
+            console.error('Save cost error:', error);
+            alert('An unexpected error occurred while saving the cost.');
+        }
     }
 
 
-# ---------- Routes ----------
-@app.route("/")
-def page():
-    if LOAD_ERROR:
-        return f"<h3>Daraz API error at startup</h3><pre>{LOAD_ERROR}</pre>", 502
+    // --- Record Payment Modal Functions ---
 
-    # Date filters (do NOT refetch from Daraz; filter the cached set)
-    start_q = request.args.get("from")  or CREATED_AFTER_DISPLAY
-    end_q   = request.args.get("to")    or None
+    function openPaymentModal() {
+        document.getElementById('payment-modal-overlay').classList.remove('hidden');
+        document.getElementById('payment-modal-overlay').classList.add('flex');
+        document.getElementById('payment-message').classList.add('hidden');
+        // Set default date to today using JavaScript
+        const today = new Date().toISOString().split('T')[0];
+        document.getElementById('payment-date').value = today;
+    }
 
-    filtered_raw = [o for o in RAW_ORDERS_CACHE if _within_range(o.get("order_date",""), start_q, end_q)]
-    orders_view = _build_runtime_view(filtered_raw)
-    stats = _compute_stats(orders_view)
+    function closePaymentModal() {
+        document.getElementById('payment-modal-overlay').classList.add('hidden');
+        document.getElementById('payment-modal-overlay').classList.remove('flex');
+    }
 
-    return render_template(
-        "tqm.html",
-        orders=orders_view,
-        created_after=start_q,
-        created_before=end_q or "",
-        stats=stats,
-        vendors=VENDOR_CHOICES,
-    )
+    document.getElementById('record-payment-form').addEventListener('submit', async function(event) {
+        event.preventDefault();
+        const form = event.target;
+        const submitBtn = document.getElementById('payment-submit-btn');
+        const messageDiv = document.getElementById('payment-message');
+        messageDiv.classList.add('hidden');
 
-@app.post("/api/save_cost")
-def api_save_cost():
-    """
-    Body JSON: {"key": "...", "product_cost": "123.45", "packaging": "50.00", "vendor": "Tick Bags|Sleek Space|Other"}
-    Saves to product_costs.json.
-    """
-    data = request.get_json(force=True, silent=True) or {}
-    key = (data.get("key") or "").strip()
-    if not key:
-        return jsonify({"ok": False, "error": "Missing key"}), 400
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Recording...';
 
-    try:
-        pc = str(_d(data.get("product_cost")))
-        pk = str(_d(data.get("packaging")))
-    except Exception:
-        return jsonify({"ok": False, "error": "Invalid amounts"}), 400
+        const vendor = form.elements['vendor'].value;
+        const amount = form.elements['amount'].value;
+        const date = form.elements['date'].value;
 
-    vendor = (data.get("vendor") or "Other").strip()
-    if vendor not in VENDOR_CHOICES:
-        vendor = "Other"
+        try {
+            const response = await fetch('/api/record_payment', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ vendor, amount: parseFloat(amount), date })
+            });
 
-    costs = _load_json(COSTS_FILE)
-    costs[key] = {"product_cost": pc, "packaging": pk, "vendor": vendor}
-    _save_json(COSTS_FILE, costs)
-    return jsonify({"ok": True})
+            const result = await response.json();
 
-@app.post("/api/toggle_paid")
-def api_toggle_paid():
-    """
-    Body JSON: {"order_id": "...", "paid": true/false}
-    Saves to vendor_paid.json and returns new state.
-    """
-    data = request.get_json(force=True, silent=True) or {}
-    oid = (data.get("order_id") or "").strip()
-    if not oid:
-        return jsonify({"ok": False, "error": "Missing order_id"}), 400
-    paid = bool(data.get("paid"))
-    paid_map = _load_json(PAID_FILE)
-    paid_map[oid] = paid
-    _save_json(PAID_FILE, paid_map)
-    return jsonify({"ok": True, "paid": paid})
+            if (result.ok) {
+                messageDiv.textContent = 'Payment recorded successfully!';
+                messageDiv.classList.remove('hidden', 'text-red-600');
+                messageDiv.classList.add('text-green-600');
+                form.reset();
+                setTimeout(() => {
+                    closePaymentModal();
+                    window.location.reload(); // Hard reload to update stats
+                }, 1500);
+            } else {
+                messageDiv.textContent = 'Error: ' + (result.error || 'Failed to record payment.');
+                messageDiv.classList.remove('hidden', 'text-green-600');
+                messageDiv.classList.add('text-red-600');
+            }
+        } catch (error) {
+            messageDiv.textContent = 'An unexpected error occurred.';
+            messageDiv.classList.remove('hidden', 'text-green-600');
+            messageDiv.classList.add('text-red-600');
+            console.error('Payment record error:', error);
+        } finally {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Record Payment';
+        }
+    });
 
-if __name__ == "__main__":
-    print("Open: http://127.0.0.1:5000/")
-    app.run(debug=True)
+
+    // --- Payment History Modal Functions ---
+
+    function openHistoryModal() {
+        document.getElementById('history-modal-overlay').classList.remove('hidden');
+        document.getElementById('history-modal-overlay').classList.add('flex');
+        loadPaymentHistory();
+    }
+
+    function closeHistoryModal() {
+        document.getElementById('history-modal-overlay').classList.add('hidden');
+        document.getElementById('history-modal-overlay').classList.remove('flex');
+    }
+
+    async function loadPaymentHistory() {
+        const loadingDiv = document.getElementById('history-loading');
+        const contentDiv = document.getElementById('history-content-area');
+        loadingDiv.classList.remove('hidden');
+        contentDiv.innerHTML = '';
+
+        try {
+            const response = await fetch('/api/get_payments');
+            const result = await response.json();
+
+            if (result.ok) {
+                loadingDiv.classList.add('hidden');
+                if (result.history.length === 0) {
+                    contentDiv.innerHTML = '<p class="text-gray-500 text-center py-4">No payment history found.</p>';
+                    return;
+                }
+
+                let historyHtml = `
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead>
+                            <tr class="bg-gray-50 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                <th class="px-3 py-3 text-left">Date</th>
+                                <th class="px-3 py-3 text-left">Vendor</th>
+                                <th class="px-3 py-3 text-right">Amount</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">
+                `;
+
+                result.history.forEach(p => {
+                    historyHtml += `
+                        <tr class="hover:bg-gray-50">
+                            <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-500">${p.date}</td>
+                            <td class="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-900">${p.vendor}</td>
+                            <td class="px-3 py-2 whitespace-nowrap text-sm text-right font-semibold text-green-700">${p.amount_fmt}</td>
+                        </tr>
+                    `;
+                });
+
+                historyHtml += `
+                        </tbody>
+                    </table>
+                `;
+                contentDiv.innerHTML = historyHtml;
+
+            } else {
+                loadingDiv.textContent = 'Error loading history: ' + (result.error || 'Unknown error.');
+                loadingDiv.classList.remove('hidden');
+                loadingDiv.classList.add('text-red-600');
+            }
+        } catch (error) {
+            loadingDiv.textContent = 'An unexpected error occurred while fetching history.';
+            loadingDiv.classList.remove('hidden');
+            loadingDiv.classList.add('text-red-600');
+            console.error('History load error:', error);
+        }
+    }
+
+    // Set today's date for filter input if 'created_before' is empty (to default to filtering up to today)
+    window.onload = function() {
+        const toInput = document.getElementById('to');
+        if (!toInput.value) {
+            toInput.value = new Date().toISOString().split('T')[0];
+        }
+    }
+
+</script>
+</body>
+</html>
