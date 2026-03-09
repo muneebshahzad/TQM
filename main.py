@@ -110,19 +110,37 @@ def _item_key(it: dict) -> str:
 
 # --- DATABASE CONNECTION (Using your provided function structures) ---
 
-def get_db_connection():
-    """Connects to MSSQL using environment variables via pymssql."""
+def get_db_connection(retries=10, delay=5):
+    """Connect to MSSQL with retry logic."""
     server = os.getenv('DB_SERVER')
     database = os.getenv('DB_DATABASE')
     username = os.getenv('DB_USERNAME')
     password = os.getenv('DB_PASSWORD')
-    try:
-        connection = pymssql.connect(server=server, user=username, password=password, database=database)
-        return connection
-    except pymssql.Error as e:
-        print(f"Error connecting to the database: {str(e)}")
-        # If connection fails, return None for graceful handling in I/O functions
-        return None
+
+    attempt = 0
+
+    while attempt < retries:
+        try:
+            connection = pymssql.connect(
+                server=server,
+                user=username,
+                password=password,
+                database=database,
+                timeout=10,
+                login_timeout=10
+            )
+            print("Database connected")
+            return connection
+
+        except pymssql.Error as e:
+            attempt += 1
+            print(f"[DB] Connection attempt {attempt}/{retries} failed: {e}")
+
+            if attempt >= retries:
+                print("[DB] Max retries reached. Giving up.")
+                return None
+
+            time.sleep(delay)
 
 
 def check_database_connection():
