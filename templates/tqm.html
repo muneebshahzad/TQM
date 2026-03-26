@@ -228,7 +228,7 @@
 
 <script type="text/javascript">
     // Helper function to find order data by ID
-    const ORDERS_DATA = JSON.parse('{{ orders | tojson }}');
+    const ORDERS_DATA = {{ orders | tojson }};
 
     function getOrderData(orderId) {
         return ORDERS_DATA.find(o => String(o.order_id) === String(orderId));
